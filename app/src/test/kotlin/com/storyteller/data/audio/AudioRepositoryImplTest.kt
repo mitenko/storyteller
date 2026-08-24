@@ -4,7 +4,9 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.storyteller.data.local.StorytellerDatabase
+import com.storyteller.data.sha256
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -122,6 +124,34 @@ class AudioRepositoryImplTest {
 
         assertTrue(r.audioFor("Hello", "v-a").isFailure)
         assertEquals(0, dir.listFiles()?.size ?: 0)
+        assertNull(db.cachedAudioDao().find(sha256("v-a|Hello")))
+    }
+
+    // Review finding (fix round 1): AudioRepositoryImpl had no per-key synchronization,
+    // so two units sharing identical text and voice (a repeated "Help!" on a page) could
+    // both miss dao.find(key) and both hit the network — a direct double-purchase — and
+    // both open the same "<key>.mp3.part" path with a non-append stream, truncating and
+    // interleaving each other's writes. Worse, the winner's dao.upsert ran unconditionally
+    // after its renameTo succeeded, with no check that the bytes were actually intact, so
+    // a corrupted file could be permanently cached and served as a normal hit forever
+    // after — exactly the "mistakable for a valid cache entry" outcome the brief forbids.
+    // A single enqueued response makes the race fail loudly rather than silently: if two
+    // requests reach the network, the second finds an empty queue.
+    @Test fun `two concurrent requests for the same text and voice synthesize only once`() = runBlocking {
+        val bytes = byteArrayOf(1, 2, 3)
+        server.enqueue(audioResponse(bytes))
+        val r = repo()
+
+        val a = async(Dispatchers.Default) { r.audioFor("Help!", "v-antoni") }
+        val b = async(Dispatchers.Default) { r.audioFor("Help!", "v-antoni") }
+
+        val first = withTimeout(5_000) { a.await() }.getOrThrow()
+        val second = withTimeout(5_000) { b.await() }.getOrThrow()
+
+        assertEquals(1, server.requestCount)
+        assertEquals(first.absolutePath, second.absolutePath)
+        assertArrayEquals(bytes, first.readBytes())
+        assertArrayEquals(bytes, second.readBytes())
     }
 
     // Regression for a defect this project has hit twice already (VoiceRepositoryImpl

@@ -5,7 +5,10 @@ import com.storyteller.data.local.CachedAudioEntity
 import com.storyteller.data.sha256
 import com.storyteller.domain.repository.AudioRepository
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Files live in the app's internal files dir, not the cache dir, so the OS cannot
@@ -23,6 +26,27 @@ import java.io.File
  * would be load-bearing here. Cancellation is caught first and rethrown; everything
  * else becomes a Result.failure.
  *
+ * Per-key synchronization (fix round 1): ReadingPipelineImpl.prepareAll fans every
+ * unit on a page out concurrently with no de-duplication, so two units sharing
+ * identical text and voice (a repeated "Help!") genuinely call audioFor for the
+ * same key at the same time. Without a lock, both would miss the cache and both
+ * hit the network (a double-purchase), and both would open the same ".part" path
+ * with a non-append stream, truncating and interleaving each other's writes; the
+ * winner's dao.upsert would then cache whatever corrupted bytes happened to land,
+ * permanently. A per-key Mutex (chosen over a shared in-flight Deferred) serializes
+ * same-key callers so the second one waits, then finds the cache already populated
+ * by the first and returns without touching the network. Mutex was chosen over a
+ * shared Deferred because its cancellation semantics fall out for free: a caller
+ * cancelled while waiting to acquire the lock simply throws CancellationException
+ * at that suspension point without touching the lock holder's coroutine, so one
+ * caller's cancellation can never cancel a synthesis another caller is still
+ * awaiting, and cancellation still propagates to whichever caller was actually
+ * cancelled. A shared Deferred would need its own scope, decoupled from every
+ * caller's job, to get the same guarantee. The lock map itself is never pruned —
+ * its entries are as cheap and as permanent as the disk cache they guard, and
+ * pruning them safely would need the same care Room's cache intentionally skips
+ * per the "no eviction" note below.
+ *
  * No eviction, no size cap, no TTL in iteration 1 — deliberate.
  */
 class AudioRepositoryImpl(
@@ -31,26 +55,38 @@ class AudioRepositoryImpl(
     private val audioDir: File,
 ) : AudioRepository {
 
+    private val locks = ConcurrentHashMap<String, Mutex>()
+
     override suspend fun audioFor(text: String, voiceId: String): Result<File> {
         val key = sha256("$voiceId|$text")
 
-        dao.find(key)?.let { row ->
-            val existing = File(row.path)
-            // A row can outlive its file if the user clears app storage; treat a
-            // missing or zero-length file as a miss rather than handing back a
-            // broken path.
-            if (existing.exists() && existing.length() > 0) return Result.success(existing)
-        }
+        cached(key)?.let { return Result.success(it) }
 
-        return try {
-            Result.success(synthesize(key, text, voiceId))
-        } catch (e: CancellationException) {
-            cleanUpPartial(key)
-            throw e
-        } catch (e: Throwable) {
-            cleanUpPartial(key)
-            Result.failure(e)
+        val lock = locks.computeIfAbsent(key) { Mutex() }
+        return lock.withLock {
+            // Another caller for this exact key may have finished synthesizing
+            // while we were waiting for the lock; re-check before paying for a
+            // second synthesis.
+            cached(key)?.let { return@withLock Result.success(it) }
+            try {
+                Result.success(synthesize(key, text, voiceId))
+            } catch (e: CancellationException) {
+                cleanUpPartial(key)
+                throw e
+            } catch (e: Throwable) {
+                cleanUpPartial(key)
+                Result.failure(e)
+            }
         }
+    }
+
+    private suspend fun cached(key: String): File? {
+        val row = dao.find(key) ?: return null
+        val existing = File(row.path)
+        // A row can outlive its file if the user clears app storage; treat a
+        // missing or zero-length file as a miss rather than handing back a
+        // broken path.
+        return if (existing.exists() && existing.length() > 0) existing else null
     }
 
     private suspend fun synthesize(key: String, text: String, voiceId: String): File {
