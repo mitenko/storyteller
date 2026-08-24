@@ -1,0 +1,93 @@
+package com.storyteller.data.voice
+
+import android.content.Context
+import androidx.room.Room
+import androidx.test.core.app.ApplicationProvider
+import com.storyteller.data.local.StorytellerDatabase
+import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import mockwebserver3.MockResponse
+import mockwebserver3.MockWebServer
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import retrofit2.Retrofit
+import retrofit2.converter.kotlinx.serialization.asConverterFactory
+import kotlin.random.Random
+
+@RunWith(RobolectricTestRunner::class)
+class VoiceRepositoryImplTest {
+
+    private lateinit var server: MockWebServer
+    private lateinit var db: StorytellerDatabase
+    private lateinit var api: ElevenLabsVoiceApi
+
+    private val body = """
+        {"voices":[
+          {"voice_id":"v-rachel","name":"Rachel"},
+          {"voice_id":"v-antoni","name":"Antoni"},
+          {"voice_id":"v-bella","name":"Bella"}
+        ]}
+    """.trimIndent()
+
+    @Before fun setUp() {
+        server = MockWebServer().apply { start() }
+        val json = Json { ignoreUnknownKeys = true }
+        api = Retrofit.Builder()
+            .baseUrl(server.url("/"))
+            .client(OkHttpClient())
+            .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+            .build()
+            .create(ElevenLabsVoiceApi::class.java)
+        db = Room.inMemoryDatabaseBuilder(
+            ApplicationProvider.getApplicationContext<Context>(),
+            StorytellerDatabase::class.java,
+        ).allowMainThreadQueries().build()
+    }
+
+    @After fun tearDown() { server.close(); db.close() }
+
+    private fun repo(seed: Int = 42) =
+        VoiceRepositoryImpl(api, db.voiceDao(), db.voiceListDao(), Random(seed))
+
+    @Test fun `assigns a voice from the list on first sight`() = runTest {
+        server.enqueue(MockResponse(body = body))
+        val id = repo().voiceFor("Wolf").getOrThrow()
+        assertTrue(id in setOf("v-rachel", "v-antoni", "v-bella"))
+    }
+
+    @Test fun `same character gets the same voice on the second call`() = runTest {
+        server.enqueue(MockResponse(body = body))
+        val r = repo()
+        val first = r.voiceFor("Wolf").getOrThrow()
+        val second = r.voiceFor("Wolf").getOrThrow()
+        assertEquals(first, second)
+    }
+
+    @Test fun `voice list is fetched only once across many characters`() = runTest {
+        server.enqueue(MockResponse(body = body))
+        val r = repo()
+        r.voiceFor("Wolf").getOrThrow()
+        r.voiceFor("Little Red").getOrThrow()
+        r.voiceFor("Narrator").getOrThrow()
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test fun `server error surfaces as a failure`() = runTest {
+        server.enqueue(MockResponse(code = 500))
+        val result = repo().voiceFor("Wolf")
+        assertTrue(result.isFailure)
+    }
+
+    @Test fun `sends the api key header`() = runTest {
+        server.enqueue(MockResponse(body = body))
+        repo().voiceFor("Wolf").getOrThrow()
+        assertEquals("/v1/voices", server.takeRequest().target)
+    }
+}
