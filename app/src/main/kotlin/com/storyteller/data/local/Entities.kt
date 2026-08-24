@@ -17,7 +17,7 @@ data class ParsedPageEntity(
     val createdAt: Long,
 )
 
-/** Keyed on sha256(text + voiceId) — survives re-photographing the same page. */
+/** Keyed on sha256("$voiceId|$text") — survives re-photographing the same page. */
 @Entity(tableName = "cached_audio")
 data class CachedAudioEntity(
     @PrimaryKey val key: String,
