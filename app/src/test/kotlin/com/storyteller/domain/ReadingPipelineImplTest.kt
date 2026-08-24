@@ -7,14 +7,18 @@ import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.SpeechUnit
 import com.storyteller.domain.repository.AudioRepository
 import com.storyteller.domain.repository.PageReader
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
@@ -148,6 +152,59 @@ class ReadingPipelineImplTest {
         }
     }
 
+    @Test
+    fun `a spurious CancellationException from a repository still reaches Failed`() = runTest {
+        val reader = FakePageReader(Result.success((0..2).map { speechUnit(it) }))
+        val p = ReadingPipelineImpl(reader, FakeVoiceRepository(), CancellingAudioRepository(), this)
+
+        p.state.test {
+            skipItems(1)
+            p.start(pageImage())
+            skipItems(2) // Reading, Preparing(empty)
+            val failed = awaitItem() as PipelineState.Failed
+            assertEquals(FailureReason.Synthesis, failed.reason)
+            assertTrue(failed.retryable)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a spurious CancellationException from the reader still reaches Failed`() = runTest {
+        val p = ReadingPipelineImpl(CancellingPageReader(), FakeVoiceRepository(), FakeAudioRepository(), this)
+
+        p.state.test {
+            skipItems(1)
+            p.start(pageImage())
+            assertEquals(PipelineState.Reading, awaitItem())
+            val failed = awaitItem() as PipelineState.Failed
+            assertEquals(FailureReason.Network, failed.reason)
+            assertTrue(failed.retryable)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    /** The other half of the discriminator: real cancellation must stay silent. */
+    @Test
+    fun `reset mid-read leaves Idle and reports no failure`() = runTest {
+        val p = ReadingPipelineImpl(
+            SlowPageReader((0..2).map { speechUnit(it) }),
+            FakeVoiceRepository(),
+            FakeAudioRepository(),
+            this,
+        )
+
+        val seen = mutableListOf<PipelineState>()
+        val collector = launch(UnconfinedTestDispatcher(testScheduler)) { p.state.collect { seen += it } }
+        p.start(pageImage())
+        advanceTimeBy(50) // mid-read: the vision call has not returned
+        p.reset()
+        advanceUntilIdle()
+        collector.cancel()
+
+        assertEquals(PipelineState.Idle, p.state.value)
+        assertTrue("cancellation must not be reported: $seen", seen.none { it is PipelineState.Failed })
+    }
+
     // ---- Hardening: a failed page must not keep buying audio nobody hears ----
 
     @Test
@@ -160,52 +217,81 @@ class ReadingPipelineImplTest {
         )
         val p = pipeline(reader, audio, scope = this)
 
+        var atFailure = -1
         p.state.test {
             skipItems(1)
             p.start(pageImage())
             while (awaitItem() !is PipelineState.Failed) { /* drain to failure */ }
+            atFailure = audio.requested.size
             cancelAndIgnoreRemainingEvents()
         }
         advanceUntilIdle()
 
-        // Ceiling is the 3 permitted in flight plus at most one that grabbed the
-        // permit the failing unit released. Without cancellation all 10 are
-        // synthesized — nine paid-for clips for a page that will never play.
-        val requested = audio.requested.toList()
-        assertTrue(
-            "failure must cancel outstanding synthesis, but requested=$requested",
-            requested.size <= 4,
+        // The invariant is "stop paying once the page is dead", so assert the
+        // count stops growing rather than pinning a ceiling — whether a fourth
+        // request slipped through on a freed permit is dispatcher-order detail.
+        // Without cancellation all 10 units are synthesized: nine paid-for clips
+        // for a page that will never play.
+        assertEquals(
+            "no synthesis may start after the page failed",
+            atFailure,
+            audio.requested.size,
         )
-        assertTrue(
-            "no late unit may be synthesized after the failure: $requested",
-            requested.none { it in setOf("line 5", "line 6", "line 7", "line 8", "line 9") },
-        )
+        assertTrue("fan-out must still have happened, was $atFailure", atFailure >= 3)
     }
 
     // ---- Hardening: a cancelled run must not write state ----
 
     /**
-     * Runs on the multi-threaded dispatcher the production scope uses, because
-     * that is the only place the race exists: `reset()` publishes `Idle` while
-     * the await loop may still be walking already-resolved deferreds. A virtual
-     * -time single-threaded test cannot interleave the two. Repeated to make the
-     * unguarded interleaving likely rather than lucky.
+     * The gate for the epoch guard, and deterministic: all three units resolve at
+     * the same virtual instant, so the in-order await loop drains them in one
+     * uninterrupted dispatcher task — `await()` on a resolved deferred neither
+     * suspends nor checks cancellation. The loop is not hookless, though: it writes
+     * `_state` every iteration, and an unconfined collector resumes inline at
+     * exactly that point, which is where this test calls `reset()`. Pre-fix the
+     * second and third writes land on top of `Idle`. Reentrant `synchronized`
+     * makes the inline `reset()` from inside `setState` safe.
      */
     @Test
-    fun `reset during preparation is not overwritten by the cancelled run`() = runBlocking {
-        repeat(20) { iteration ->
+    fun `a superseded run cannot write state after reset`() = runTest {
+        val units = (0..2).map { speechUnit(it) }
+        val audio = FakeAudioRepository(delays = units.associate { it.text to 100L })
+        val p = pipeline(FakePageReader(Result.success(units)), audio, scope = this)
+
+        val seen = mutableListOf<PipelineState>()
+        val collector = launch(UnconfinedTestDispatcher(testScheduler)) {
+            p.state.collect {
+                seen += it
+                if (it is PipelineState.Preparing && it.ready.size == 1) p.reset()
+            }
+        }
+        p.start(pageImage())
+        advanceUntilIdle()
+        collector.cancel()
+
+        assertEquals(PipelineState.Idle, p.state.value)
+        assertEquals("last state seen out of $seen", PipelineState.Idle, seen.last())
+    }
+
+    /**
+     * Smoke check over the production shape — a real multi-threaded dispatcher and
+     * real time — because the deterministic test above necessarily runs on a single
+     * thread. Kept small: it cannot fail when the bug is present, it can only
+     * confirm the guard holds where the race actually lives.
+     */
+    @Test
+    fun `reset during preparation holds Idle on a multi-threaded dispatcher`() = runBlocking {
+        repeat(3) { iteration ->
             val scope = CoroutineScope(Dispatchers.Default)
             try {
                 val units = (0..9).map { speechUnit(it) }
-                val audio = FakeAudioRepository(delays = units.associate { it.text to 30L })
                 val p = ReadingPipelineImpl(
                     FakePageReader(Result.success(units)),
                     FakeVoiceRepository(),
-                    audio,
+                    FakeAudioRepository(delays = units.associate { it.text to 30L }),
                     scope,
                 )
                 p.start(pageImage())
-                // Reset mid-page: some units prepared, most still outstanding.
                 val observed = withTimeout(5_000) {
                     p.state.first {
                         (it is PipelineState.Preparing && it.ready.isNotEmpty()) || it is PipelineState.Ready
@@ -216,8 +302,7 @@ class ReadingPipelineImplTest {
                 if (observed is PipelineState.Ready) return@repeat
                 p.reset()
                 assertEquals(PipelineState.Idle, p.state.value)
-                // Give every in-flight unit the chance to publish a stale state.
-                delay(150)
+                delay(150) // let every in-flight unit try to publish a stale state
                 assertEquals("state written after reset on iteration $iteration", PipelineState.Idle, p.state.value)
             } finally {
                 scope.cancel()
@@ -234,4 +319,21 @@ private class ThrowingAudioRepository : AudioRepository {
 private class ThrowingPageReader : PageReader {
     override suspend fun read(image: PageImage): Result<List<SpeechUnit>> =
         throw java.io.IOException("socket closed")
+}
+
+private class CancellingAudioRepository : AudioRepository {
+    override suspend fun audioFor(text: String, voiceId: String): Result<File> =
+        throw CancellationException("spurious")
+}
+
+private class CancellingPageReader : PageReader {
+    override suspend fun read(image: PageImage): Result<List<SpeechUnit>> =
+        throw CancellationException("spurious")
+}
+
+private class SlowPageReader(private val units: List<SpeechUnit>) : PageReader {
+    override suspend fun read(image: PageImage): Result<List<SpeechUnit>> {
+        delay(100)
+        return Result.success(units)
+    }
 }

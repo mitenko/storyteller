@@ -13,9 +13,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -105,8 +107,17 @@ class ReadingPipelineImpl(
         try {
             block()
         } catch (e: CancellationException) {
-            // Structured concurrency: cancellation is not a failure to report.
-            throw e
+            // A CancellationException while this coroutine is still active is not
+            // cancellation, it is a repository fault wearing cancellation's clothes:
+            // Future.get, ListenableFuture, Task.await, CameraX and Media3 all raise
+            // java.util.concurrent.CancellationException on internal cancellation.
+            // Rethrowing it would leave the reader spinning, because a
+            // CancellationException out of a launch body is reported to nobody.
+            if (currentCoroutineContext().isActive) {
+                setState(myEpoch, PipelineState.Failed(e.toReason(FailureReason.Network), retryable = true))
+            } else {
+                throw e // genuinely cancelled: structured concurrency, nothing to report
+            }
         } catch (e: Throwable) {
             setState(myEpoch, PipelineState.Failed(e.toReason(FailureReason.Network), retryable = true))
         }
@@ -167,7 +178,9 @@ class ReadingPipelineImpl(
         val file = audio.audioFor(unit.text, voiceId).getOrElse { return Result.failure(it) }
         Result.success(PreparedUnit(unit, voiceId, file))
     } catch (e: CancellationException) {
-        throw e
+        // See `guarded`: still-active means a spurious cancellation from the
+        // repository, which has to become a reportable failure.
+        if (currentCoroutineContext().isActive) Result.failure(e) else throw e
     } catch (e: Throwable) {
         Result.failure(e)
     }
