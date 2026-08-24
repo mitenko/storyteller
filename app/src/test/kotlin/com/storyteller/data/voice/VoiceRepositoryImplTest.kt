@@ -4,7 +4,13 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.storyteller.data.local.StorytellerDatabase
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -12,6 +18,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -19,6 +26,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
+import java.util.concurrent.TimeUnit
 import kotlin.random.Random
 
 @RunWith(RobolectricTestRunner::class)
@@ -89,5 +97,32 @@ class VoiceRepositoryImplTest {
         server.enqueue(MockResponse(body = body))
         repo().voiceFor("Wolf").getOrThrow()
         assertEquals("/v1/voices", server.takeRequest().target)
+    }
+
+    // Regression for a review finding: runCatching catches Throwable
+    // unconditionally, so it was swallowing CancellationException from the
+    // in-flight Retrofit call and returning it as an ordinary Result.failure
+    // instead of letting it propagate. ReadingPipelineImpl relies on a real
+    // CancellationException reaching it to tell a genuine job cancellation
+    // apart from a spurious one raised inside a repository; a repository
+    // that converts cancellation into a value defeats that entirely.
+    @Test fun `cancellation propagates instead of becoming a Result failure`() = runBlocking {
+        server.enqueue(
+            MockResponse.Builder()
+                .body(body)
+                .bodyDelay(10, TimeUnit.SECONDS)
+                .build(),
+        )
+        val r = repo()
+        var result: Result<String>? = null
+        val job = launch(Dispatchers.Default) {
+            result = r.voiceFor("Wolf")
+        }
+        withTimeout(5_000) {
+            while (server.requestCount == 0) delay(5)
+        }
+        withTimeout(5_000) { job.cancelAndJoin() }
+        assertTrue(job.isCancelled)
+        assertNull("cancellation must propagate, not resolve to a Result", result)
     }
 }

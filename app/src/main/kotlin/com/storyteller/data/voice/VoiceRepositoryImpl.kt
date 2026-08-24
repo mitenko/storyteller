@@ -5,6 +5,7 @@ import com.storyteller.data.local.VoiceDao
 import com.storyteller.data.local.VoiceListDao
 import com.storyteller.data.local.VoiceListEntity
 import com.storyteller.domain.repository.VoiceRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.random.Random
@@ -20,15 +21,23 @@ class VoiceRepositoryImpl(
     // and hand the same character two different voices.
     private val lock = Mutex()
 
-    override suspend fun voiceFor(character: String): Result<String> = runCatching {
-        voiceDao.find(character)?.let { return@runCatching it.voiceId }
-        lock.withLock {
-            voiceDao.find(character)?.let { return@withLock it.voiceId }
-            val pool = voicePool()
-            require(pool.isNotEmpty()) { "ElevenLabs returned no voices" }
-            val chosen = pool[random.nextInt(pool.size)]
-            voiceDao.upsert(CharacterVoiceEntity(character, chosen))
-            chosen
+    override suspend fun voiceFor(character: String): Result<String> {
+        voiceDao.find(character)?.let { return Result.success(it.voiceId) }
+        return try {
+            Result.success(
+                lock.withLock {
+                    voiceDao.find(character)?.let { return@withLock it.voiceId }
+                    val pool = voicePool()
+                    require(pool.isNotEmpty()) { "ElevenLabs returned no voices" }
+                    val chosen = pool[random.nextInt(pool.size)]
+                    voiceDao.upsert(CharacterVoiceEntity(character, chosen))
+                    chosen
+                }
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Result.failure(e)
         }
     }
 
