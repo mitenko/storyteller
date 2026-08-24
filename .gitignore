@@ -1,0 +1,42 @@
+# --- Secrets ---------------------------------------------------------------
+# Holds the Anthropic and ElevenLabs API keys, injected into BuildConfig at
+# build time. Must never be committed.
+local.properties
+*.keystore
+*.jks
+
+# --- Android / Gradle ------------------------------------------------------
+.gradle/
+build/
+captures/
+.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+local.properties.bak
+lint/intermediates/
+lint/generated/
+lint/outputs/
+lint/tmp/
+
+# --- IDE -------------------------------------------------------------------
+.idea/
+*.iml
+*.iws
+*.ipr
+.kotlin/
+
+# --- OS --------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Tooling ---------------------------------------------------------------
+.claude/settings.local.json
+
+# --- Eval fixtures ---------------------------------------------------------
+# Photos of real book pages used by the vision eval harness: potentially
+# copyrighted material, and large. Keep them local.
+evals/fixtures/

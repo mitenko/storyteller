@@ -1,0 +1,21 @@
+# Normalize to LF in the repository; check out native on Windows.
+* text=auto
+
+# Scripts must stay LF or they break on CI and on Unix shells.
+gradlew text eol=lf
+*.sh text eol=lf
+
+# Windows-only scripts stay CRLF.
+gradlew.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binaries: never touch.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.mp3 binary
+*.wav binary
+*.jar binary
+*.keystore binary
+*.jks binary
