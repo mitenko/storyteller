@@ -93,6 +93,8 @@ dependencies {
     testImplementation(libs.room.testing)
     testImplementation(libs.okhttp.mockwebserver)
     testImplementation(libs.androidx.junit)
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.ui.test.junit4)
 
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.test.runner)
