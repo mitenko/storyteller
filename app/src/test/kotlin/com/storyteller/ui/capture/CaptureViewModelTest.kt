@@ -82,4 +82,18 @@ class CaptureViewModelTest {
         vm.onRetake()
         assertEquals(1, pipeline.resets)
     }
+
+    @Test fun `confirmAndNavigate starts the pipeline before navigating away`() = runTest {
+        val pipeline = RecordingPipeline()
+        val vm = CaptureViewModel(pipeline)
+        vm.onPermissionResult(true)
+        vm.onCaptured(jpeg())
+
+        var pipelineWasRunningWhenNavigated = false
+        confirmAndNavigate(vm) {
+            pipelineWasRunningWhenNavigated = pipeline.started.isNotEmpty()
+        }
+
+        assertTrue(pipelineWasRunningWhenNavigated)
+    }
 }

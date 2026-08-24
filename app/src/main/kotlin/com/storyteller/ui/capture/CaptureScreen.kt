@@ -23,9 +23,12 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -48,6 +51,16 @@ fun CaptureScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     val imageCapture = remember { ImageCapture.Builder().build() }
     val executor = remember { Executors.newSingleThreadExecutor() }
+
+    // The executor backs a single non-daemon thread parked on queue.take(), which is
+    // a GC root - without an explicit shutdown it is never collected. It is scoped to
+    // CaptureScreen's own lifetime (not to Framing) because it must survive the
+    // Framing <-> Captured transitions that happen on every retake within one visit
+    // to this screen; it is only safe to shut down when the screen itself is torn
+    // down, i.e. once, on navigation away.
+    DisposableEffect(Unit) {
+        onDispose { executor.shutdown() }
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -73,6 +86,13 @@ fun CaptureScreen(
                 // the camera to it exactly once rather than on every recomposition.
                 val previewView = remember { PreviewView(context) }
 
+                // Tracks the provider once awaitInstance() resolves, purely so onDispose
+                // below can find it - bindToLifecycle binds to the Activity lifecycle,
+                // not this composable's, so nothing else would ever unbind the camera
+                // when the user leaves this screen (e.g. to listen to narration on the
+                // reader), and the camera indicator would stay lit the whole time.
+                var boundProvider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
+
                 LaunchedEffect(previewView) {
                     // ProcessCameraProvider.getInstance(ctx).get() blocks the calling
                     // thread; awaitInstance() suspends instead, so this never risks an
@@ -87,6 +107,14 @@ fun CaptureScreen(
                         preview,
                         imageCapture,
                     )
+                    boundProvider = provider
+                }
+
+                DisposableEffect(previewView) {
+                    // If the user leaves before awaitInstance() resolves, boundProvider
+                    // is still null here - the coroutine above gets cancelled with
+                    // nothing bound yet, so there is nothing to unbind and no throw.
+                    onDispose { boundProvider?.unbindAll() }
                 }
 
                 AndroidView(modifier = Modifier.fillMaxSize(), factory = { previewView })
@@ -127,15 +155,20 @@ fun CaptureScreen(
             ) {
                 OutlinedButton(onClick = viewModel::onRetake) { Text("Retake") }
                 Button(
-                    onClick = {
-                        // The pipeline must already be running before the reader
-                        // composes, so start it before navigating - not after
-                        // awaiting anything.
-                        viewModel.onConfirm()
-                        onNavigateToReader()
-                    },
+                    onClick = { confirmAndNavigate(viewModel, onNavigateToReader) },
                 ) { Text("Read this page") }
             }
         }
     }
+}
+
+/**
+ * The pipeline must already be running before the reader composes, so it is
+ * started before navigating - never the other way round, and never with an
+ * await in between. Pulled out of the onClick lambda so this ordering has a
+ * unit test ([CaptureViewModelTest]) independent of Compose.
+ */
+internal fun confirmAndNavigate(viewModel: CaptureViewModel, onNavigateToReader: () -> Unit) {
+    viewModel.onConfirm()
+    onNavigateToReader()
 }
