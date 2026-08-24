@@ -34,6 +34,12 @@ class ReadingPipelineImpl(
     private var job: Job? = null
     private var lastImage: PageImage? = null
 
+    /**
+     * The last successful page parse. Retry reuses it so a synthesis failure
+     * never costs a second vision call.
+     */
+    private var parsed: List<SpeechUnit>? = null
+
     override fun start(image: PageImage) {
         lastImage = image
         job?.cancel()
@@ -41,14 +47,24 @@ class ReadingPipelineImpl(
     }
 
     override fun retry() {
+        val cached = parsed
         val image = lastImage ?: return
-        start(image)
+        job?.cancel()
+        job = scope.launch {
+            if (cached != null) {
+                _state.value = PipelineState.Preparing(ready = emptyList(), total = cached.size)
+                prepareAll(cached)
+            } else {
+                run(image)
+            }
+        }
     }
 
     override fun reset() {
         job?.cancel()
         job = null
         lastImage = null
+        parsed = null
         _state.value = PipelineState.Idle
     }
 
@@ -64,6 +80,7 @@ class ReadingPipelineImpl(
             return
         }
 
+        parsed = units
         _state.value = PipelineState.Preparing(ready = emptyList(), total = units.size)
         prepareAll(units)
     }
