@@ -39,6 +39,16 @@ class ReaderViewModel @Inject constructor(
     private fun onPipelineState(state: PipelineState) {
         when (state) {
             PipelineState.Idle, PipelineState.Reading -> {
+                // ReadingPipelineImpl publishes Reading as the FIRST state of every
+                // fresh run(), before any Preparing/Ready exists for that page - so
+                // it means exactly "a new page has started, nothing is queued for it
+                // yet." Resetting here (not just in onRetry) is what keeps a reused
+                // ReaderViewModel correct across two capture->read cycles: without
+                // it, page two would start with a stale high-water mark and silently
+                // skip its own units. Safe against late writes: the pipeline's epoch
+                // guard already drops Preparing/Ready from a superseded run, so a
+                // stale-epoch state cannot arrive after this reset and be misread.
+                queued = 0
                 _uiState.value = ReaderUiState.ReadingPage
             }
 
@@ -64,6 +74,17 @@ class ReaderViewModel @Inject constructor(
             }
 
             is PipelineState.Failed -> {
+                // Without this, units already queued (e.g. one unit synthesized
+                // before a later one failed) keep playing underneath the error
+                // screen until they run out - the child hears "Couldn't read this
+                // page" while the Wolf keeps talking. stop() also clears the
+                // player's queue, which matters because onRetry() zeroes `queued`
+                // in this ViewModel but does not otherwise touch the player: without
+                // clearing here, a retry that re-queues unit 0 would call play()
+                // again, which does reset the playlist - but stopping now is the
+                // honest signal the moment the page is known broken, not just an
+                // accident of what play() happens to do later.
+                player.stop()
                 queued = 0
                 _uiState.value = ReaderUiState.Error(state.reason.message(), state.retryable)
             }

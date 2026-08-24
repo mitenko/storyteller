@@ -169,19 +169,61 @@ class ReaderViewModelTest {
             )
         }
 
-    @Test fun `failure maps to an error with a retry affordance`() = runTest(dispatcher) {
-        val pipeline = FakePipeline()
-        val vm = ReaderViewModel(pipeline, FakePlayer())
+    @Test fun `failure maps to an error with a retry affordance and stops the player`() =
+        runTest(dispatcher) {
+            val pipeline = FakePipeline()
+            val player = FakePlayer()
+            val vm = ReaderViewModel(pipeline, player)
 
-        pipeline.states.value = PipelineState.Failed(FailureReason.NoTextFound, retryable = true)
-        runCurrent()
-        val error = vm.uiState.value as ReaderUiState.Error
-        assertTrue(error.canRetry)
-        assertTrue(error.message.contains("read this page", ignoreCase = true))
+            pipeline.states.value = PipelineState.Failed(FailureReason.NoTextFound, retryable = true)
+            runCurrent()
+            val error = vm.uiState.value as ReaderUiState.Error
+            assertTrue(error.canRetry)
+            assertTrue(error.message.contains("read this page", ignoreCase = true))
+            assertEquals(
+                "units already queued must not keep playing under the error screen",
+                1,
+                player.stops,
+            )
 
-        vm.onRetry()
-        assertEquals(1, pipeline.retries)
-    }
+            vm.onRetry()
+            assertEquals(1, pipeline.retries)
+        }
+
+    @Test fun `a second page on the same ViewModel instance queues its own units from scratch`() =
+        runTest(dispatcher) {
+            // Guards against a ReaderViewModel instance being reused across two
+            // capture->read cycles (e.g. a future nav-graph tweak that scopes the
+            // ViewModel to a parent entry). Without resetting the high-water mark
+            // on Reading, page two's Preparing/Ready would see ready.size <= queued
+            // left over from page one and silently skip every one of its own units.
+            val pipeline = FakePipeline()
+            val player = FakePlayer()
+            ReaderViewModel(pipeline, player)
+
+            // Page one, start to finish.
+            pipeline.states.value = PipelineState.Preparing(listOf(prepared(0), prepared(1)), 2)
+            runCurrent()
+            pipeline.states.value = PipelineState.Ready(listOf(prepared(0), prepared(1)))
+            runCurrent()
+
+            // Page two, on the same ViewModel. ReadingPipelineImpl publishes Reading
+            // as the first state of every fresh run(), before that page has any
+            // units of its own.
+            pipeline.states.value = PipelineState.Reading
+            runCurrent()
+            pipeline.states.value = PipelineState.Preparing(listOf(prepared(0), prepared(1)), 2)
+            runCurrent()
+            pipeline.states.value = PipelineState.Ready(listOf(prepared(0), prepared(1)))
+            runCurrent()
+
+            assertEquals(
+                "play() must run again for page two's first unit, not be skipped",
+                listOf(0, 0),
+                player.played,
+            )
+            assertEquals(listOf(1, 1), player.appended)
+        }
 
     @Test fun `each failure reason gets its own message`() = runTest(dispatcher) {
         val pipeline = FakePipeline()
