@@ -5,10 +5,12 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.storyteller.domain.model.PlaybackState
 import com.storyteller.domain.model.PreparedUnit
 import com.storyteller.domain.model.SpeechUnit
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
@@ -83,18 +85,92 @@ class PagePlayerImplTest {
      * from delay() calls the virtual scheduler can see. Under runTest the
      * virtual clock found nothing left to advance and jumped straight to the
      * 10s timeout without giving playback any real time to finish.
+     *
+     * A bare wait-for-Finished assertion would pass identically if append()
+     * were a no-op stub, since a single 200ms item alone reaches STATE_ENDED
+     * well inside the timeout. So this also asserts: the final playlist holds
+     * all 3 items, they became current in strict reading order (0, 1, 2), and
+     * wall-clock elapsed is consistent with three ~200ms items having actually
+     * played rather than just one.
      */
     @Test
-    fun playsAGrowingPlaylistThroughToFinished() = runBlocking {
+    fun playsAGrowingPlaylistThroughToFinishedInOrder() = runBlocking {
         lateinit var player: PagePlayerImpl
         val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val start = System.nanoTime()
         instrumentation.runOnMainSync {
             player = PagePlayerImpl(context)
             player.play(listOf(prepared(0, silence("a.wav"))))
             player.append(prepared(1, silence("b.wav")))
             player.append(prepared(2, silence("c.wav")))
+            player.endOfPage()
         }
         try {
+            withTimeout(10_000) {
+                assertEquals(PlaybackState.Finished, player.state.first { it == PlaybackState.Finished })
+            }
+            val elapsedMs = (System.nanoTime() - start) / 1_000_000
+            // Nominal total is 3 * 200ms = 600ms; a generous lower bound well
+            // under that avoids flaking on real hardware while still failing
+            // if only one item's worth of playback actually happened.
+            assertTrue("expected >=3 items worth of playback, took ${elapsedMs}ms", elapsedMs >= 450)
+
+            var count = -1
+            var visited = emptyList<Int>()
+            instrumentation.runOnMainSync {
+                count = player.mediaItemCountForTest
+                visited = player.visitedMediaItemIndicesForTest
+            }
+            assertEquals(3, count)
+            assertEquals(listOf(0, 1, 2), visited)
+        } finally {
+            instrumentation.runOnMainSync { player.release() }
+        }
+    }
+
+    /**
+     * Proves Critical B's fix: append() exists precisely so audio starts
+     * before the page finishes synthesizing, which means item 0 finishing
+     * playback before item 1's synthesis lands is the normal case, not an
+     * edge case. Without endOfPage() gating STATE_ENDED, the player cannot
+     * tell "temporarily starved, more coming" from "genuinely done" and would
+     * latch Finished the moment item 0 alone runs out — stranding items still
+     * to arrive. This test waits well past item 0's 200ms runtime before
+     * appending item 1, asserts the state has NOT prematurely finished during
+     * that starved gap, then confirms Finished only arrives after endOfPage()
+     * once item 1 actually completes.
+     */
+    @Test
+    fun staysPlayingWhileStarvedAndOnlyFinishesAfterEndOfPage() = runBlocking {
+        lateinit var player: PagePlayerImpl
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        instrumentation.runOnMainSync {
+            player = PagePlayerImpl(context)
+            player.play(listOf(prepared(0, silence("a.wav"))))
+        }
+        try {
+            // item 0 is a 200ms clip, but measured on-device logcat timestamps
+            // (STATE_BUFFERING -> STATE_READY -> STATE_ENDED) showed local WAV
+            // prepare/buffer latency alone costs ~325ms before playback even
+            // starts, so ENDED naturally lands around ~540ms after play(), not
+            // ~200ms. A 400ms margin was tried first and produced a false pass
+            // when the fix was reverted: STATE_ENDED simply hadn't fired yet at
+            // the 400ms mark, so the assertion below held regardless of whether
+            // the gating fix was present, and it was proving nothing. 1000ms
+            // leaves a safe margin above the measured ~540ms for device
+            // variance while still keeping the test fast.
+            delay(1000)
+            assertEquals(
+                "playlist merely ran dry pending more units; must not be Finished yet",
+                PlaybackState.Playing,
+                player.state.value,
+            )
+
+            instrumentation.runOnMainSync {
+                player.append(prepared(1, silence("b.wav")))
+                player.endOfPage()
+            }
+
             withTimeout(10_000) {
                 assertEquals(PlaybackState.Finished, player.state.first { it == PlaybackState.Finished })
             }

@@ -26,5 +26,13 @@ interface PagePlayer {
     val state: StateFlow<PlaybackState>
     fun play(units: List<PreparedUnit>)
     fun append(unit: PreparedUnit)
+
+    /**
+     * Marks that no more units are coming for the current page. Until this is
+     * called, running out of queued media means the playlist is merely starved
+     * (synthesis for the rest of the page hasn't landed yet), not finished —
+     * only after this is called can running out mean the page is actually done.
+     */
+    fun endOfPage()
     fun stop()
 }
