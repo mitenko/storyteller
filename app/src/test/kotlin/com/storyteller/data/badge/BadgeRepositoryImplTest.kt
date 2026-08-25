@@ -65,10 +65,27 @@ class BadgeRepositoryImplTest {
     @Test fun `keeps the first crop when the character is seen again`() = runTest {
         db.voiceDao().upsert(CharacterVoiceEntity("Bear", "v1"))
         val first = repo.badgesFor(page(), listOf(ParsedCharacter("Bear", null, BoundingBox(0.1f, 0.1f, 0.4f, 0.5f))))
+        val firstBadge = first.getValue("Bear")
+        assertTrue("expected a crop, got $firstBadge", firstBadge is Badge.Image)
 
         val second = repo.badgesFor(page(), listOf(ParsedCharacter("Bear", null, BoundingBox(0.5f, 0.5f, 0.9f, 0.9f))))
+        val secondBadge = second.getValue("Bear")
 
-        assertEquals(first.getValue("Bear"), second.getValue("Bear"))
+        assertTrue("expected a crop, got $secondBadge", secondBadge is Badge.Image)
+        assertEquals((firstBadge as Badge.Image).file.absolutePath, (secondBadge as Badge.Image).file.absolutePath)
+    }
+
+    @Test fun `crops a character with no character_voice row yet`() = runTest {
+        // No upsert(): setBadgePath is an UPDATE, so a missing row makes it
+        // affect zero rows. That must be a no-op, not a lost badge.
+        val badges = repo.badgesFor(
+            page(),
+            listOf(ParsedCharacter("Otter", "🦦", BoundingBox(0.1f, 0.1f, 0.4f, 0.5f))),
+        )
+
+        val badge = badges.getValue("Otter")
+        assertTrue("expected a crop, got $badge", badge is Badge.Image)
+        assertTrue((badge as Badge.Image).file.length() > 0)
     }
 
     @Test fun `a sliver box degrades to the emoji rather than failing`() = runTest {

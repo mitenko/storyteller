@@ -13,6 +13,8 @@ import com.storyteller.domain.model.ParsedCharacter
 import com.storyteller.domain.repository.BadgeRepository
 import java.io.File
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private const val TAG = "BadgeRepository"
 private const val QUALITY = 90
@@ -40,27 +42,19 @@ class BadgeRepositoryImpl(
      * blank. Every failure degrades one step; none may propagate, because a page
      * is perfectly readable with no badges and a broken crop must not become an
      * error screen.
+     *
+     * The crop filename is deterministic per character (sha256 of the name), so
+     * a race between two resolves for the same character converges on the same
+     * path rather than producing two files: disk, not the character_voice row,
+     * is the source of truth for whether a crop already exists. The row is kept
+     * in sync as a best-effort optimization only — a missing or stale row must
+     * never cost an already-cropped character its badge, and an established
+     * target file is NEVER deleted once written.
      */
     private suspend fun resolve(image: PageImage, character: ParsedCharacter): Badge {
         val emojiOrNone = character.emoji?.let(Badge::Emoji) ?: Badge.None
         return try {
-            voiceDao.find(character.name)?.badgePath
-                ?.let(::File)
-                ?.takeIf { it.exists() && it.length() > 0 }
-                ?.let { return Badge.Image(it) }
-
-            val bounds = character.bounds ?: return emojiOrNone
-            val file = crop(image, character.name, bounds) ?: return emojiOrNone
-
-            // Loses the race deliberately: if another page wrote first, that crop
-            // wins and this one is discarded, because first sighting wins.
-            if (voiceDao.setBadgePath(character.name, file.absolutePath) == 0) {
-                file.delete()
-                val existing = voiceDao.find(character.name)?.badgePath?.let(::File)
-                if (existing != null && existing.exists()) Badge.Image(existing) else emojiOrNone
-            } else {
-                Badge.Image(file)
-            }
+            withContext(Dispatchers.IO) { resolveOnIo(image, character, emojiOrNone) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
@@ -69,23 +63,54 @@ class BadgeRepositoryImpl(
         }
     }
 
-    private fun crop(
-        image: PageImage,
-        name: String,
-        bounds: BoundingBox,
-    ): File? {
+    private suspend fun resolveOnIo(image: PageImage, character: ParsedCharacter, emojiOrNone: Badge): Badge {
+        val target = File(badgesDir, "${sha256(character.name)}.jpg")
+        if (target.exists() && target.length() > 0) return usingStored(character.name, target)
+
+        val bounds = character.bounds ?: return emojiOrNone
+        val temp = cropToTemp(image, bounds) ?: return emojiOrNone
+        return try {
+            // Move into place only while target is still absent: the filename is
+            // deterministic per character, so if another resolve already landed
+            // one, that crop wins and this temp is discarded rather than
+            // clobbering it.
+            if (!target.exists()) temp.renameTo(target)
+            if (target.exists() && target.length() > 0) {
+                usingStored(character.name, target)
+            } else {
+                emojiOrNone
+            }
+        } finally {
+            temp.delete()
+        }
+    }
+
+    /**
+     * The file already exists on disk at this point, so a DAO failure here
+     * (missing row, disk fault, whatever) is logged and swallowed rather than
+     * downgrading an already-successful crop to a fallback badge.
+     */
+    private suspend fun usingStored(name: String, target: File): Badge {
+        try {
+            voiceDao.setBadgePath(name, target.absolutePath)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.w(TAG, "failed to persist badge path for $name", e)
+        }
+        return Badge.Image(target)
+    }
+
+    /** Crops to a fresh, uniquely-named temp file in [badgesDir]; never writes [target] directly. */
+    private fun cropToTemp(image: PageImage, bounds: BoundingBox): File? {
         val full = BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size) ?: return null
         return try {
             val rect = cropRect(bounds, full.width, full.height) ?: return null
             val cropped = Bitmap.createBitmap(full, rect.left, rect.top, rect.width, rect.height)
             try {
-                // sha256(name), not name.hashCode(): hashCode collides across
-                // distinct strings, and this file is written BEFORE the
-                // setBadgePath first-write-wins guard runs, so a collision would
-                // silently overwrite one character's badge with another's face.
-                val out = File(badgesDir, "${sha256(name)}.jpg")
-                out.outputStream().use { cropped.compress(Bitmap.CompressFormat.JPEG, QUALITY, it) }
-                out.takeIf { it.length() > 0 }
+                val temp = File.createTempFile("badge-", ".jpg", badgesDir)
+                temp.outputStream().use { cropped.compress(Bitmap.CompressFormat.JPEG, QUALITY, it) }
+                if (temp.length() > 0) temp else { temp.delete(); null }
             } finally {
                 if (cropped !== full) cropped.recycle()
             }

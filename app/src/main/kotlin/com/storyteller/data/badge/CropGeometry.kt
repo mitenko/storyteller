@@ -37,9 +37,16 @@ fun cropRect(
     val right = ((bounds.right * imageWidth) + pad).coerceAtMost(imageWidth.toFloat())
     val bottom = ((bounds.bottom * imageHeight) + pad).coerceAtMost(imageHeight.toFloat())
 
-    val width = (right - left).roundToInt()
-    val height = (bottom - top).roundToInt()
+    // left/top and width/height are paired from the SAME rounded edges, not
+    // rounded independently: rounding left and (right-left) separately can each
+    // round up and land one pixel past the image edge (e.g. left=10.5 and a
+    // right clamped to 800.0 on an 800px image would give 11 + 790 = 801),
+    // which real Bitmap.createBitmap rejects with IllegalArgumentException.
+    val leftPx = left.roundToInt()
+    val topPx = top.roundToInt()
+    val width = right.roundToInt() - leftPx
+    val height = bottom.roundToInt() - topPx
     if (width <= 0 || height <= 0) return null
 
-    return PixelRect(left.roundToInt(), top.roundToInt(), width, height)
+    return PixelRect(leftPx, topPx, width, height)
 }
