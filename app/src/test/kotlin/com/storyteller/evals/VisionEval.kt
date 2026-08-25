@@ -22,6 +22,53 @@ import java.io.File
 private data class Expected(val speakers: List<String>, val minUnits: Int)
 
 /**
+ * Outcome of scoring one fixture against its expected/&lt;name&gt;.json, or the reason
+ * it wasn't scored at all. SKIP/ERROR are kept out of the pass-rate
+ * denominator deliberately: see [EvalTally].
+ */
+internal enum class RowOutcome { PASS, FAIL, SKIP, ERROR }
+
+internal data class EvalRow(val outcome: RowOutcome, val boxed: Boolean = false)
+
+/**
+ * The denominator for both the pass rate and the bounding-box rate is
+ * [evaluated] (PASS + FAIL only) — never the total fixture count. A fixture
+ * with no matching expected/&lt;name&gt;.json (SKIP) or one whose read errored (ERROR)
+ * was never actually scored, so counting it in the denominator would make an
+ * incomplete evals/fixtures/ directory — the exact workflow this project's
+ * own README recommends, building coverage up one photo at a time — silently
+ * tank the reported rate. That would contradict evals/expected/README.md's
+ * promise that an unlabelled fixture "is skipped ... rather than counted as
+ * a failure, so an incomplete evals/fixtures/ directory degrades gracefully
+ * instead of tanking the pass rate," and would corrupt the one number the
+ * brief asks to be recorded as a baseline for future prompt changes.
+ */
+internal data class EvalTally(
+    val evaluated: Int,
+    val passed: Int,
+    val skipped: Int,
+    val errors: Int,
+    val boxed: Int,
+) {
+    /**
+     * Built entirely from integer counts, never a computed float ratio, so an
+     * all-skipped/all-errored run (evaluated == 0) renders "0/0" instead of a
+     * division-by-zero NaN or crash.
+     */
+    fun summaryLine(): String =
+        "--- $passed/$evaluated evaluated passed ($skipped skipped, $errors errors); " +
+            "$boxed/$evaluated evaluated returned bounding boxes ---\n"
+}
+
+internal fun tally(rows: List<EvalRow>): EvalTally = EvalTally(
+    evaluated = rows.count { it.outcome == RowOutcome.PASS || it.outcome == RowOutcome.FAIL },
+    passed = rows.count { it.outcome == RowOutcome.PASS },
+    skipped = rows.count { it.outcome == RowOutcome.SKIP },
+    errors = rows.count { it.outcome == RowOutcome.ERROR },
+    boxed = rows.count { it.outcome != RowOutcome.SKIP && it.outcome != RowOutcome.ERROR && it.boxed },
+)
+
+/**
  * Not a pass/fail test. The model is non-deterministic, so this scores a pass RATE
  * over real photographs and prints a report. It is skipped unless
  * STORYTELLER_EVAL=1 and ANTHROPIC_API_KEY are both set, so it never runs in the
@@ -82,14 +129,14 @@ class VisionEval {
 
         val reader = PageReaderImpl(api, noCache, json)
 
-        var passed = 0
-        var withBoxes = 0
+        val rows = mutableListOf<EvalRow>()
         val report = StringBuilder("\n=== Vision eval ===\n")
 
         for (photo in fixtures) {
             val expectedFile = File("../evals/expected/${photo.nameWithoutExtension}.json")
             if (!expectedFile.exists()) {
                 report.append("SKIP  ${photo.name} — no expected/${expectedFile.name}\n")
+                rows += EvalRow(RowOutcome.SKIP)
                 continue
             }
             val expected = json.decodeFromString<Expected>(expectedFile.readText())
@@ -98,6 +145,7 @@ class VisionEval {
             val image = downscaleToPageImage(photo.readBytes())
             val units = reader.read(image).getOrElse { e ->
                 report.append("ERROR ${photo.name} — ${e.message}\n")
+                rows += EvalRow(RowOutcome.ERROR)
                 continue
             }
 
@@ -105,12 +153,11 @@ class VisionEval {
             val speakersOk = speakers == expected.speakers.sorted()
             val countOk = units.size >= expected.minUnits
             val boxed = units.count { it.bounds != null }
-            if (boxed > 0) withBoxes++
+            val passed = speakersOk && countOk
+            rows += EvalRow(if (passed) RowOutcome.PASS else RowOutcome.FAIL, boxed = boxed > 0)
 
-            if (speakersOk && countOk) passed++
-            report.append(
-                if (speakersOk && countOk) "PASS  " else "FAIL  ",
-            ).append(photo.name)
+            report.append(if (passed) "PASS  " else "FAIL  ")
+                .append(photo.name)
                 .append(" — units=").append(units.size).append("/min ").append(expected.minUnits)
                 .append(", speakers=").append(speakers)
                 .append(" expected=").append(expected.speakers.sorted())
@@ -118,8 +165,7 @@ class VisionEval {
                 .append('\n')
         }
 
-        val scored = fixtures.size
-        report.append("--- $passed/$scored pages passed; $withBoxes/$scored returned bounding boxes ---\n")
+        report.append(tally(rows).summaryLine())
         println(report)
     }
 }
