@@ -26,6 +26,7 @@ import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -149,6 +150,57 @@ class PageReaderImplTest {
     @Test fun `blank page yields an empty list rather than an error`() = runTest {
         server.enqueue(okResponse("[]"))
         assertTrue(reader().read(image(1)).getOrThrow().isEmpty())
+    }
+
+    /**
+     * textBlock() reaches for the first content block of type "text" and would throw
+     * NoSuchElementException if there is none. A refusal-shaped response (200 OK,
+     * well-formed envelope, no text block) is the realistic way that happens, and
+     * nothing covered it: read() must resolve it to Result.failure rather than let
+     * the throw escape a Result-returning function.
+     */
+    @Test fun `a response with no text block is a failure, not a crash`() = runTest {
+        server.enqueue(MockResponse(body = """{"stop_reason":"refusal","content":[]}"""))
+        server.enqueue(okResponse("""[{"speaker":"Wolf","text":"Hi","bounds":null}]"""))
+        val r = reader()
+
+        val failed = r.read(image(4, 2))
+
+        assertTrue(failed.isFailure)
+        assertNotNull(failed.exceptionOrNull())
+        // Nothing was parsed, so nothing may have been cached: the retry must call
+        // the network again rather than replay a poisoned cache entry.
+        assertEquals("Hi", r.read(image(4, 2)).getOrThrow().single().text)
+        assertEquals(2, server.requestCount)
+    }
+
+    /**
+     * The parse cache is the most-travelled path on this branch and hit/miss parity
+     * was asserted nowhere for the one field that round-trips through JSON with any
+     * structure: bounds. A hit must reproduce a non-null BoundingBox exactly as the
+     * fresh call produced it, coercion included.
+     */
+    @Test fun `a cache hit reproduces non-null bounds identically to the fresh read`() = runTest {
+        server.enqueue(
+            okResponse(
+                """[
+                  {"speaker":"Narrator","text":"Once upon a time,","bounds":null},
+                  {"speaker":"Wolf","text":"Get away!","bounds":{"left":0.1,"top":0.2,"right":0.5,"bottom":0.4}}
+                ]""",
+            ),
+        )
+        val r = reader()
+
+        val fresh = r.read(image(5, 5)).getOrThrow()
+        val hit = r.read(image(5, 5)).getOrThrow()
+
+        assertEquals("the second read must not call the network", 1, server.requestCount)
+        assertEquals(fresh.map { it.index }, hit.map { it.index })
+        assertEquals(fresh.map { it.speaker }, hit.map { it.speaker })
+        assertEquals(fresh.map { it.text }, hit.map { it.text })
+        assertEquals(fresh.map { it.bounds }, hit.map { it.bounds })
+        assertNotNull("the fixture must actually carry bounds", hit[1].bounds)
+        assertNull(hit[0].bounds)
     }
 
     @Test fun `http error is a failure and is not cached`() = runTest {
