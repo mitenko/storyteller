@@ -1,6 +1,13 @@
 package com.storyteller.ui.capture
 
 import android.Manifest
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.Intent
+import android.graphics.BitmapFactory
+import android.net.Uri
+import android.provider.Settings
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -12,6 +19,7 @@ import androidx.camera.core.Preview as CameraPreview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.lifecycle.awaitInstance
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,12 +39,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.storyteller.domain.model.PageImage
 import java.util.concurrent.Executors
 
 private const val TAG = "CaptureScreen"
@@ -62,24 +73,34 @@ fun CaptureScreen(
         onDispose { executor.shutdown() }
     }
 
+    // Once the user has denied twice (or picked "never ask again"), Android stops
+    // showing the dialog at all and returns denied immediately - the in-app "Allow
+    // camera" button becomes visibly inert and the app is unusable forever. The
+    // only reliable signal for that is shouldShowRequestPermissionRationale going
+    // false right after a denial, so it is sampled in the result callback rather
+    // than read during composition: re-emitting the same PermissionRequired state
+    // would not recompose anything (StateFlow conflates equal values), so a
+    // composition-time read would never notice the second denial.
+    val activity = remember(context) { context.findActivity() }
+    var permanentlyDenied by remember { mutableStateOf(false) }
+
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
-    ) { granted -> viewModel.onPermissionResult(granted) }
+    ) { granted ->
+        viewModel.onPermissionResult(granted)
+        permanentlyDenied = !granted &&
+            activity?.shouldShowRequestPermissionRationale(Manifest.permission.CAMERA) == false
+    }
 
     LaunchedEffect(Unit) { permissionLauncher.launch(Manifest.permission.CAMERA) }
 
     Box(Modifier.fillMaxSize()) {
-        when (state) {
-            CaptureUiState.PermissionRequired -> Column(
-                Modifier.fillMaxSize().padding(24.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text("Storyteller needs the camera to read a page.")
-                Button(onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }) {
-                    Text("Allow camera")
-                }
-            }
+        when (val current = state) {
+            CaptureUiState.PermissionRequired -> PermissionRequest(
+                permanentlyDenied = permanentlyDenied,
+                onRequest = { permissionLauncher.launch(Manifest.permission.CAMERA) },
+                onOpenSettings = { context.startActivity(appSettingsIntent(context.packageName)) },
+            )
 
             CaptureUiState.Framing -> {
                 // Created once per entry into Framing; the LaunchedEffect below binds
@@ -149,17 +170,98 @@ fun CaptureScreen(
                 ) { Text("Take photo") }
             }
 
-            is CaptureUiState.Captured -> Row(
-                Modifier.fillMaxWidth().align(Alignment.BottomCenter).padding(24.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-            ) {
-                OutlinedButton(onClick = viewModel::onRetake) { Text("Retake") }
-                Button(
-                    onClick = { confirmAndNavigate(viewModel, onNavigateToReader) },
-                ) { Text("Read this page") }
-            }
+            is CaptureUiState.Captured -> CapturedPage(
+                image = current.image,
+                onRetake = viewModel::onRetake,
+                onConfirm = { confirmAndNavigate(viewModel, onNavigateToReader) },
+            )
         }
     }
+}
+
+/**
+ * The review branch. It must actually SHOW the photo: the spec rules out automatic
+ * blur detection precisely because the user judges the preview visually and
+ * retakes, and before this the Captured branch rendered two buttons over an empty
+ * Box - PreviewView had left the composition with Framing and the camera was
+ * unbound, so the screen went blank at the shutter and the child was asked to
+ * choose Retake or Read with nothing to judge.
+ *
+ * PageImage.bytes is already downscaled to 1568px or less, so decoding it for
+ * display is cheap - but it is still remembered on the image rather than decoded
+ * again on every recomposition.
+ */
+@Composable
+internal fun CapturedPage(
+    image: PageImage,
+    onRetake: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    Box(Modifier.fillMaxSize()) {
+        val preview = remember(image) {
+            BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size)?.asImageBitmap()
+        }
+        if (preview != null) {
+            Image(
+                bitmap = preview,
+                contentDescription = "The page you just photographed",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit,
+            )
+        }
+
+        Row(
+            Modifier.fillMaxWidth().align(Alignment.BottomCenter).padding(24.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            OutlinedButton(onClick = onRetake) { Text("Retake") }
+            Button(onClick = onConfirm) { Text("Read this page") }
+        }
+    }
+}
+
+/**
+ * Stateless so both halves can be tested without a camera or a real permission
+ * grant. [permanentlyDenied] is the dead end the spec's failure table calls out:
+ * re-requesting is a no-op once Android has stopped asking, so the only honest
+ * affordance left is a deep link into the app's own settings page.
+ */
+@Composable
+internal fun PermissionRequest(
+    permanentlyDenied: Boolean,
+    onRequest: () -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    Column(
+        Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("Storyteller needs the camera to read a page.")
+        if (permanentlyDenied) {
+            Text("Camera access is switched off. Turn it on in Settings to read a page.")
+            Button(onClick = onOpenSettings) { Text("Open settings") }
+        } else {
+            Button(onClick = onRequest) { Text("Allow camera") }
+        }
+    }
+}
+
+/** The app's own settings page - where a permanently denied camera can be re-enabled. */
+internal fun appSettingsIntent(packageName: String): Intent =
+    Intent(
+        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+        Uri.fromParts("package", packageName, null),
+    )
+
+/**
+ * LocalContext under Compose can be a ContextWrapper rather than the Activity, and
+ * shouldShowRequestPermissionRationale only exists on Activity.
+ */
+internal tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 /**
