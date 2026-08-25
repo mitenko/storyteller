@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.storyteller.domain.ReadingPipeline
 import com.storyteller.domain.model.FailureReason
 import com.storyteller.domain.model.PipelineState
+import com.storyteller.domain.model.PlaybackState
 import com.storyteller.domain.model.PreparedUnit
 import com.storyteller.domain.repository.PagePlayer
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -30,9 +31,26 @@ class ReaderViewModel @Inject constructor(
      */
     private var queued = 0
 
+    /**
+     * Last observed player state. Mirrored into ReaderUiState.Playing so the reader
+     * has an ending: nothing outside PagePlayerImpl observed PlaybackState before,
+     * so the whole endOfPage()/pageComplete mechanism reported to no one.
+     */
+    private var playback: PlaybackState = PlaybackState.Idle
+
     init {
         viewModelScope.launch {
             pipeline.state.collect { state -> onPipelineState(state) }
+        }
+        viewModelScope.launch {
+            player.state.collect { state ->
+                playback = state
+                // Only Playing carries it; the other branches are pipeline-driven
+                // and would be overwritten by the next pipeline emission anyway.
+                (_uiState.value as? ReaderUiState.Playing)?.let {
+                    _uiState.value = it.copy(playback = state)
+                }
+            }
         }
     }
 
@@ -70,6 +88,7 @@ class ReaderViewModel @Inject constructor(
                 player.endOfPage()
                 _uiState.value = ReaderUiState.Playing(
                     state.units.map { ReaderUiState.Line(it.unit.speaker, it.unit.text) },
+                    playback,
                 )
             }
 
@@ -116,7 +135,26 @@ class ReaderViewModel @Inject constructor(
         pipeline.retry()
     }
 
-    fun onStop() = player.stop()
+    /**
+     * Stopping playback belongs here, NOT in a DisposableEffect on ReaderScreen.
+     *
+     * The screen's composition is disposed on every configuration change - a
+     * rotation disposes and recomposes it - but this ViewModel is retained across
+     * that, scoped to the nav back-stack entry. So a DisposableEffect { onStop() }
+     * would stop the audio on rotation while the retained ViewModel's collector
+     * (started once, in init) never re-runs, `queued` stays at its high-water mark,
+     * and nothing ever calls play() again: the story is silenced permanently with
+     * no control to recover it.
+     *
+     * onCleared() fires exactly when the reader is genuinely finished with - the
+     * nav entry being popped clears its ViewModelStore - and NOT on rotation. That
+     * keeps the coverage the DisposableEffect was introduced for (system/gesture
+     * back and the NavHost popping the entry, not just the explicit button) while
+     * dropping the one case that was wrong.
+     */
+    override fun onCleared() {
+        player.stop()
+    }
 }
 
 private fun FailureReason.message(): String = when (this) {

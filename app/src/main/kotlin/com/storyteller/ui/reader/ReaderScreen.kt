@@ -11,7 +11,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -20,6 +19,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.storyteller.domain.model.PlaybackState
 
 @Composable
 fun ReaderScreen(
@@ -28,13 +28,10 @@ fun ReaderScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
-    // Leaving this screen must stop playback however it happens - the explicit
-    // "Take another photo" button below, a system back press, or a future
-    // NavHost popping it in Task 13 - not only the one button that happens to
-    // call onBack. onDispose is the single choke point all of those share.
-    DisposableEffect(Unit) {
-        onDispose { viewModel.onStop() }
-    }
+    // No DisposableEffect stopping playback here: the composition is disposed on
+    // every configuration change, so that would silence the story on rotation
+    // while the retained ViewModel never restarts it. Stopping lives in
+    // ReaderViewModel.onCleared() instead - see its kdoc.
 
     ReaderContent(state = state, onRetry = viewModel::onRetry, onBack = onBack)
 }
@@ -61,15 +58,31 @@ fun ReaderContent(
                 Text("Getting voices ready… ${state.ready} of ${state.total}")
             }
 
-            is ReaderUiState.Playing -> LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                items(state.lines) { line ->
-                    Column {
-                        Text(line.speaker, style = MaterialTheme.typography.labelMedium)
-                        Text(line.text, style = MaterialTheme.typography.bodyLarge)
+            is ReaderUiState.Playing -> {
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    items(state.lines) { line ->
+                        Column {
+                            Text(line.speaker, style = MaterialTheme.typography.labelMedium)
+                            Text(line.text, style = MaterialTheme.typography.bodyLarge)
+                        }
                     }
                 }
+
+                // The only place PlaybackState is rendered. Iteration 1 reads the
+                // page straight through, so this is the whole of the playback UI:
+                // an ending when the player says the page is done...
+                if (state.playback == PlaybackState.Finished) {
+                    Text("The End.", style = MaterialTheme.typography.titleMedium)
+                }
+
+                // ...and one way out, offered from the moment lines appear rather
+                // than only once Finished, because a child may want to move on to
+                // the next page early. Before this, the successful path had no
+                // control at all - "Take another photo" existed only under Error.
+                Button(onClick = onBack) { Text("Take another photo") }
             }
 
             is ReaderUiState.Error -> Centered {

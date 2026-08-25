@@ -1,5 +1,8 @@
 package com.storyteller.ui.reader
 
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStore
 import com.storyteller.domain.ReadingPipeline
 import com.storyteller.domain.model.FailureReason
 import com.storyteller.domain.model.PageImage
@@ -225,6 +228,44 @@ class ReaderViewModelTest {
             assertEquals(listOf(1, 1), player.appended)
         }
 
+    /**
+     * PlaybackState had no consumer anywhere outside PagePlayerImpl and its own
+     * tests, so endOfPage(), the pageComplete gate and the onPlayerError fallback
+     * all resolved a signal nobody read and a finished page never showed an ending.
+     */
+    @Test fun `player state reaches the playing ui state`() = runTest(dispatcher) {
+        val pipeline = FakePipeline()
+        val player = FakePlayer()
+        val vm = ReaderViewModel(pipeline, player)
+
+        pipeline.states.value = PipelineState.Ready(listOf(prepared(0)))
+        runCurrent()
+        assertEquals(PlaybackState.Idle, (vm.uiState.value as ReaderUiState.Playing).playback)
+
+        player.state.value = PlaybackState.Playing
+        runCurrent()
+        assertEquals(PlaybackState.Playing, (vm.uiState.value as ReaderUiState.Playing).playback)
+
+        player.state.value = PlaybackState.Finished
+        runCurrent()
+        assertEquals(PlaybackState.Finished, (vm.uiState.value as ReaderUiState.Playing).playback)
+    }
+
+    @Test fun `player state does not overwrite a later error screen`() = runTest(dispatcher) {
+        val pipeline = FakePipeline()
+        val player = FakePlayer()
+        val vm = ReaderViewModel(pipeline, player)
+
+        pipeline.states.value = PipelineState.Ready(listOf(prepared(0)))
+        runCurrent()
+        pipeline.states.value = PipelineState.Failed(FailureReason.Network, retryable = true)
+        runCurrent()
+
+        player.state.value = PlaybackState.Finished
+        runCurrent()
+        assertTrue(vm.uiState.value is ReaderUiState.Error)
+    }
+
     @Test fun `each failure reason gets its own message`() = runTest(dispatcher) {
         val pipeline = FakePipeline()
         val vm = ReaderViewModel(pipeline, FakePlayer())
@@ -238,10 +279,30 @@ class ReaderViewModelTest {
         assertEquals("every reason needs a distinct message", FailureReason.entries.size, messages.size)
     }
 
-    @Test fun `onStop stops the player`() = runTest(dispatcher) {
+    /**
+     * The lifecycle regression that a missing manual walkthrough hid: playback used
+     * to be stopped from a DisposableEffect on ReaderScreen, which fires on every
+     * configuration change. Rotating the phone silenced the story permanently,
+     * because the retained ViewModel's collector never re-runs and nothing calls
+     * play() again. Clearing the ViewModelStore is what actually happens when the
+     * nav entry is popped (button back, system back, gesture back) and is what must
+     * stop the player - rotation does not clear the store.
+     */
+    @Test fun `clearing the ViewModel store stops the player`() = runTest(dispatcher) {
         val player = FakePlayer()
         val vm = ReaderViewModel(FakePipeline(), player)
-        vm.onStop()
-        assertEquals(1, player.stops)
+        val store = ViewModelStore()
+        ViewModelProvider(
+            store,
+            object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T = vm as T
+            },
+        )[ReaderViewModel::class.java]
+        runCurrent()
+
+        assertEquals("nothing has ended the reader yet", 0, player.stops)
+        store.clear()
+        assertEquals("popping the reader entry must stop playback", 1, player.stops)
     }
 }
