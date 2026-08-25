@@ -4,6 +4,7 @@ import android.content.Context
 import com.storyteller.data.audio.AudioRepositoryImpl
 import com.storyteller.data.audio.ElevenLabsTtsApi
 import com.storyteller.data.audio.PagePlayerImpl
+import com.storyteller.data.badge.BadgeRepositoryImpl
 import com.storyteller.data.local.CachedAudioDao
 import com.storyteller.data.local.ParsedPageDao
 import com.storyteller.data.local.VoiceDao
@@ -13,6 +14,7 @@ import com.storyteller.data.page.PageReaderImpl
 import com.storyteller.data.voice.ElevenLabsVoiceApi
 import com.storyteller.data.voice.VoiceRepositoryImpl
 import com.storyteller.domain.repository.AudioRepository
+import com.storyteller.domain.repository.BadgeRepository
 import com.storyteller.domain.repository.PagePlayer
 import com.storyteller.domain.repository.PageReader
 import com.storyteller.domain.repository.VoiceRepository
@@ -47,6 +49,11 @@ object RepositoryModule {
         dao: CachedAudioDao,
         @Named("audioDir") dir: File,
     ): AudioRepository = AudioRepositoryImpl(api, dao, dir)
+
+    /** filesDir, not cacheDir: a purged badge would silently change a character's face mid-book. */
+    @Provides @Singleton
+    fun badgeRepository(voiceDao: VoiceDao, @ApplicationContext ctx: Context): BadgeRepository =
+        BadgeRepositoryImpl(voiceDao, ctx.filesDir)
 
     /**
      * @Singleton, not scoped to an activity: ExoPlayer is thread-confined and this

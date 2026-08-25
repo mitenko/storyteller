@@ -1,6 +1,8 @@
 package com.storyteller.domain.repository
 
+import com.storyteller.domain.model.Badge
 import com.storyteller.domain.model.PageImage
+import com.storyteller.domain.model.ParsedCharacter
 import com.storyteller.domain.model.ParsedPage
 import com.storyteller.domain.model.PlaybackState
 import com.storyteller.domain.model.PreparedUnit
@@ -20,6 +22,14 @@ interface VoiceRepository {
 /** Returns a local audio file for the text in the given voice, synthesizing on a cache miss. */
 interface AudioRepository {
     suspend fun audioFor(text: String, voiceId: String): Result<File>
+}
+
+/**
+ * Resolves what renders beside each line. Crops a character out of the page on
+ * first sighting and pins it, so a character keeps one face for a whole book.
+ */
+interface BadgeRepository {
+    suspend fun badgesFor(image: PageImage, characters: List<ParsedCharacter>): Map<String, Badge>
 }
 
 interface PagePlayer {
