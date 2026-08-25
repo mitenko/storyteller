@@ -17,6 +17,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -66,7 +67,12 @@ class ReaderViewModel @Inject constructor(
             // collector happened to run first. combine() was rejected too: it
             // would re-run state handling on every mode change and risk a re-queue
             // or replay when the user flips the toggle mid-story.
-            mode = settings.mode.first()
+            //
+            // catch{} guards this specific first() call: without it, a faulting
+            // settings.mode would kill this whole coroutine before pipeline.state
+            // is ever collected, leaving the reader stuck on ReadingPage with no
+            // error screen - a settings fault must never stop a page being read.
+            mode = settings.mode.catch { emit(ReadingMode.Auto) }.first()
             launch { settings.mode.collect { mode = it } }
             pipeline.state.collect { state -> onPipelineState(state) }
         }
@@ -136,9 +142,15 @@ class ReaderViewModel @Inject constructor(
                 // clearing here, a retry that re-queues unit 0 would call play()
                 // again, which does reset the playlist - but stopping now is the
                 // honest signal the moment the page is known broken, not just an
-                // accident of what play() happens to do later.
+                // accident of what play() happens to do later. lastReady and
+                // playingIndex are cleared alongside queued for the same reason:
+                // defence-in-depth so a stray tap can never start audio underneath
+                // the error screen, even though the Error uiState itself offers no
+                // tappable rows.
                 player.stop()
                 queued = 0
+                lastReady = emptyList()
+                playingIndex = null
                 _uiState.value = ReaderUiState.Error(state.reason.message(), state.retryable)
             }
         }

@@ -18,12 +18,15 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.yield
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -45,7 +48,21 @@ class FakePipeline : ReadingPipeline {
 
 class FakeSettingsRepository(initial: ReadingMode = ReadingMode.Auto) : SettingsRepository {
     private val modes = MutableStateFlow(initial)
-    override val mode: Flow<ReadingMode> = modes
+
+    /**
+     * A bare MutableStateFlow replays its current value SYNCHRONOUSLY on first
+     * collection, with no suspension point before that first emit - which cannot
+     * reproduce the start-up race this fake exists to test, because the real
+     * Room-backed Flow's first emission is asynchronous. `yield()` before
+     * `emitAll` forces at least one real suspension point, so a naive
+     * implementation that starts collecting pipeline.state before this flow has
+     * emitted will observe a pipeline state while `mode` is still unset/default.
+     */
+    override val mode: Flow<ReadingMode> = flow {
+        yield()
+        emitAll(modes)
+    }
+
     override suspend fun setMode(mode: ReadingMode) { modes.value = mode }
 }
 
@@ -405,6 +422,11 @@ class ReaderViewModelTest {
         advanceUntilIdle()
 
         assertTrue(player.played.isEmpty())
+        assertEquals(
+            "a rejected tap must not highlight the row either",
+            null,
+            (vm.uiState.value as ReaderUiState.Playing).playingIndex,
+        )
     }
 
     @Test fun `preparing shows every line with only ready ones enabled`() = runTest {
