@@ -6,6 +6,8 @@ import com.storyteller.domain.model.ParsedCharacter
 import com.storyteller.domain.model.ParsedPage
 import com.storyteller.domain.model.PlaybackState
 import com.storyteller.domain.model.PreparedUnit
+import com.storyteller.domain.model.ReadingMode
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
 
@@ -45,4 +47,9 @@ interface PagePlayer {
      */
     fun endOfPage()
     fun stop()
+}
+
+interface SettingsRepository {
+    val mode: Flow<ReadingMode>
+    suspend fun setMode(mode: ReadingMode)
 }

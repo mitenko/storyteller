@@ -37,3 +37,10 @@ data class VoiceListEntity(
     val voiceIdsCsv: String,
     val fetchedAt: Long,
 )
+
+/** Key-value so future settings need no migration. */
+@Entity(tableName = "settings")
+data class SettingEntity(
+    @PrimaryKey val key: String,
+    val value: String,
+)

@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface VoiceDao {
@@ -53,4 +54,13 @@ interface VoiceListDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun put(entity: VoiceListEntity)
+}
+
+@Dao
+interface SettingsDao {
+    @Query("SELECT * FROM settings WHERE key = :key")
+    fun observe(key: String): Flow<SettingEntity?>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun put(entity: SettingEntity)
 }
