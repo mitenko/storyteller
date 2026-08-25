@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -58,6 +59,7 @@ private const val TAG = "CaptureScreen"
 @Composable
 fun CaptureScreen(
     onNavigateToReader: () -> Unit,
+    onOpenSettings: () -> Unit,
     viewModel: CaptureViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -142,6 +144,16 @@ fun CaptureScreen(
                 }
 
                 AndroidView(modifier = Modifier.fillMaxSize(), factory = { previewView })
+
+                IconButton(
+                    onClick = onOpenSettings,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(16.dp),
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_settings),
+                        contentDescription = "Settings",
+                    )
+                }
 
                 ShutterButton(
                     modifier = Modifier.align(Alignment.BottomCenter).padding(32.dp),
