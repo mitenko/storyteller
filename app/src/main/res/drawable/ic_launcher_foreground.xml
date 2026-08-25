@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- An open book, kept inside the 72dp adaptive-icon safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="@color/storyteller_page"
+        android:pathData="M52,42 C42,35 32,34 25,37 L25,72 C32,69 42,70 52,76 Z" />
+    <path
+        android:fillColor="@color/storyteller_page"
+        android:pathData="M56,42 C66,35 76,34 83,37 L83,72 C76,69 66,70 56,76 Z" />
+</vector>
