@@ -9,6 +9,7 @@ import com.storyteller.domain.repository.AudioRepository
 import com.storyteller.domain.repository.BadgeRepository
 import com.storyteller.domain.repository.PageReader
 import com.storyteller.domain.repository.VoiceRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -23,13 +24,14 @@ fun pageImage() = PageImage(byteArrayOf(1, 2, 3), "image/jpeg")
  * Takes a plain `List<SpeechUnit>` result, not `ParsedPage`, so the many
  * existing `FakePageReader(Result.success(units))` call sites across the
  * pipeline tests don't need to change now that [PageReader.read] returns
- * `Result<ParsedPage>`. Wraps with an empty characters list, since nothing
- * here exercises page.characters yet (that's Task 5+).
+ * `Result<ParsedPage>`. [characters] defaults to empty for those call sites;
+ * pass it to exercise `page.characters` reaching `BadgeRepository`.
  */
 class FakePageReader(
     unitsResult: Result<List<SpeechUnit>> = Result.success(emptyList()),
+    characters: List<ParsedCharacter> = emptyList(),
 ) : PageReader {
-    var result: Result<ParsedPage> = unitsResult.map { ParsedPage(it, emptyList()) }
+    var result: Result<ParsedPage> = unitsResult.map { ParsedPage(it, characters) }
     var calls = 0
     override suspend fun read(image: PageImage): Result<ParsedPage> {
         calls++
@@ -68,12 +70,25 @@ class FakeAudioRepository(
     }
 }
 
-/** Returns [result] or, when [throwing], throws instead — badge resolution must never cost the page. */
+/**
+ * Returns [result], or throws instead — badge resolution must never cost the
+ * page. [throwing] simulates an ordinary repository fault; [throwCancellation]
+ * simulates the spurious `java.util.concurrent.CancellationException` that
+ * `BadgeRepositoryImpl` rethrows from a DAO fault (see its `resolve` and
+ * `usingStored`). [calls] records every `(image, characters)` pair received,
+ * so a test can assert the pipeline forwards the page's own values rather
+ * than, say, an empty placeholder list.
+ */
 class FakeBadgeRepository(
     private val result: Map<String, Badge> = emptyMap(),
     private val throwing: Boolean = false,
+    private val throwCancellation: Boolean = false,
 ) : BadgeRepository {
+    val calls = mutableListOf<Pair<PageImage, List<ParsedCharacter>>>()
+
     override suspend fun badgesFor(image: PageImage, characters: List<ParsedCharacter>): Map<String, Badge> {
+        calls += image to characters
+        if (throwCancellation) throw CancellationException("spurious")
         if (throwing) throw IllegalStateException("badge lookup blew up")
         return result
     }

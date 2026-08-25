@@ -155,7 +155,11 @@ class ReadingPipelineImpl(
         val resolved = try {
             badges.badgesFor(image, page.characters)
         } catch (e: CancellationException) {
-            throw e
+            // See `guarded`/`prepare`: still-active means a spurious cancellation
+            // from the repository (BadgeRepositoryImpl rethrows it from both
+            // `resolve` and `usingStored`), which must degrade to no badges
+            // rather than fail the page.
+            if (currentCoroutineContext().isActive) emptyMap() else throw e
         } catch (e: Throwable) {
             emptyMap()
         }
