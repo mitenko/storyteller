@@ -38,23 +38,30 @@ object NetworkModule {
      * so setting it again here would be harmless if it agreed with the annotation
      * — but it would also be a second place someone has to remember to update if
      * the protocol version ever changes. One source of truth: the annotation.
+     *
+     * [apiKey] is a parameter rather than a direct BuildConfig read so the test can
+     * inject a known sentinel. Asserting against BuildConfig made the header test
+     * unfalsifiable — with no local.properties both keys are "", so it passed even
+     * if the two keys were swapped or the header name was wrong — and would have
+     * printed the real key into TEST-*.xml on the day it did fail. Production still
+     * passes BuildConfig, from the @Provides methods below.
      */
-    internal fun anthropicClient(): OkHttpClient = OkHttpClient.Builder()
+    internal fun anthropicClient(apiKey: String): OkHttpClient = OkHttpClient.Builder()
         .addInterceptor { chain ->
             chain.proceed(
                 chain.request().newBuilder()
-                    .header("x-api-key", BuildConfig.ANTHROPIC_API_KEY)
+                    .header("x-api-key", apiKey)
                     .header("content-type", "application/json")
                     .build(),
             )
         }
         .build()
 
-    internal fun elevenLabsClient(): OkHttpClient = OkHttpClient.Builder()
+    internal fun elevenLabsClient(apiKey: String): OkHttpClient = OkHttpClient.Builder()
         .addInterceptor { chain ->
             chain.proceed(
                 chain.request().newBuilder()
-                    .header("xi-api-key", BuildConfig.ELEVENLABS_API_KEY)
+                    .header("xi-api-key", apiKey)
                     .build(),
             )
         }
@@ -63,14 +70,14 @@ object NetworkModule {
     @Provides @Singleton @AnthropicRetrofit
     fun anthropicRetrofit(json: Json): Retrofit = Retrofit.Builder()
         .baseUrl("https://api.anthropic.com/")
-        .client(anthropicClient())
+        .client(anthropicClient(BuildConfig.ANTHROPIC_API_KEY))
         .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
         .build()
 
     @Provides @Singleton @ElevenLabsRetrofit
     fun elevenLabsRetrofit(json: Json): Retrofit = Retrofit.Builder()
         .baseUrl("https://api.elevenlabs.io/")
-        .client(elevenLabsClient())
+        .client(elevenLabsClient(BuildConfig.ELEVENLABS_API_KEY))
         .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
         .build()
 
