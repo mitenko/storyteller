@@ -1,6 +1,7 @@
 package com.storyteller.data.page
 
 import android.util.Base64
+import com.storyteller.data.local.PARSE_VERSION
 import com.storyteller.data.local.ParsedPageDao
 import com.storyteller.data.local.ParsedPageEntity
 import com.storyteller.data.sha256
@@ -61,7 +62,7 @@ class PageReaderImpl(
     private suspend fun readOrThrow(image: PageImage): ParsedPage {
         val hash = sha256(image.bytes)
 
-        parsedPageDao.find(hash)?.let { cached ->
+        parsedPageDao.findCurrent(hash, PARSE_VERSION)?.let { cached ->
             return json.decodeFromString<PageDto>(cached.unitsJson).toDomain()
         }
 
@@ -72,7 +73,7 @@ class PageReaderImpl(
         // Cache only successful parses, and cache the normalized payload so a hit
         // and a miss produce identical results.
         parsedPageDao.upsert(
-            ParsedPageEntity(hash, json.encodeToString(page), System.currentTimeMillis()),
+            ParsedPageEntity(hash, json.encodeToString(page), System.currentTimeMillis(), parseVersion = PARSE_VERSION),
         )
         return page.toDomain()
     }

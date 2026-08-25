@@ -3,10 +3,15 @@ package com.storyteller.data.local
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
+/** Bumped whenever the cached parse payload's shape changes; older rows are misses. */
+const val PARSE_VERSION = 2
+
 @Entity(tableName = "character_voice")
 data class CharacterVoiceEntity(
     @PrimaryKey val character: String,
     val voiceId: String,
+    /** First sighting wins; see VoiceDao.setBadgePath. */
+    val badgePath: String? = null,
 )
 
 /** Keyed on a hash of the uploaded JPEG bytes, so only byte-identical input hits. */
@@ -15,6 +20,7 @@ data class ParsedPageEntity(
     @PrimaryKey val imageHash: String,
     val unitsJson: String,
     val createdAt: Long,
+    val parseVersion: Int = PARSE_VERSION,
 )
 
 /** Keyed on sha256("$voiceId|$text") — survives re-photographing the same page. */

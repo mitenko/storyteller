@@ -153,5 +153,6 @@ class VoiceRepositoryImplTest {
 
         override suspend fun count(): Int = 0
         override suspend fun upsert(entity: CharacterVoiceEntity) = Unit
+        override suspend fun setBadgePath(character: String, path: String): Int = 0
     }
 }

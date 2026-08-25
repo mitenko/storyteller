@@ -43,6 +43,7 @@ class VisionEvalSelfTest {
 
     private val noCache = object : ParsedPageDao {
         override suspend fun find(hash: String): ParsedPageEntity? = null
+        override suspend fun findCurrent(hash: String, version: Int): ParsedPageEntity? = null
         override suspend fun upsert(entity: ParsedPageEntity) = Unit
     }
 
