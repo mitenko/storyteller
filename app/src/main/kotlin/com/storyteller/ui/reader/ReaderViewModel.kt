@@ -3,15 +3,21 @@ package com.storyteller.ui.reader
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.storyteller.domain.ReadingPipeline
+import com.storyteller.domain.model.Badge
 import com.storyteller.domain.model.FailureReason
+import com.storyteller.domain.model.NARRATOR
 import com.storyteller.domain.model.PipelineState
 import com.storyteller.domain.model.PlaybackState
 import com.storyteller.domain.model.PreparedUnit
+import com.storyteller.domain.model.ReadingMode
+import com.storyteller.domain.model.SpeechUnit
 import com.storyteller.domain.repository.PagePlayer
+import com.storyteller.domain.repository.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -19,6 +25,7 @@ import javax.inject.Inject
 class ReaderViewModel @Inject constructor(
     private val pipeline: ReadingPipeline,
     private val player: PagePlayer,
+    private val settings: SettingsRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<ReaderUiState>(ReaderUiState.ReadingPage)
@@ -38,17 +45,39 @@ class ReaderViewModel @Inject constructor(
      */
     private var playback: PlaybackState = PlaybackState.Idle
 
+    /** Auto reads the page through; Tap plays nothing until a line is tapped. */
+    private var mode = ReadingMode.Auto
+
+    /** The row currently sounding in Tap mode, or null. Cleared on a fresh page and on Finished. */
+    private var playingIndex: Int? = null
+
+    /** Whatever units are synthesized so far for the current page; what onLineTapped may play. */
+    private var lastReady: List<PreparedUnit> = emptyList()
+
     init {
         viewModelScope.launch {
+            // settings.mode is a Room-backed Flow whose first emission is
+            // asynchronous. Resolving it BEFORE handling any pipeline state (rather
+            // than collecting both in parallel, or via combine()) is what stops a
+            // pipeline state that is already sitting in Ready - a StateFlow, so a
+            // late collector sees it immediately - from being processed while
+            // `mode` still holds its Auto default: that would autoplay a page the
+            // user had set to Tap, intermittently and only depending on which
+            // collector happened to run first. combine() was rejected too: it
+            // would re-run state handling on every mode change and risk a re-queue
+            // or replay when the user flips the toggle mid-story.
+            mode = settings.mode.first()
+            launch { settings.mode.collect { mode = it } }
             pipeline.state.collect { state -> onPipelineState(state) }
         }
         viewModelScope.launch {
             player.state.collect { state ->
                 playback = state
+                if (state == PlaybackState.Finished) playingIndex = null
                 // Only Playing carries it; the other branches are pipeline-driven
                 // and would be overwritten by the next pipeline emission anyway.
                 (_uiState.value as? ReaderUiState.Playing)?.let {
-                    _uiState.value = it.copy(playback = state)
+                    _uiState.value = it.copy(playback = state, playingIndex = playingIndex)
                 }
             }
         }
@@ -67,12 +96,15 @@ class ReaderViewModel @Inject constructor(
                 // guard already drops Preparing/Ready from a superseded run, so a
                 // stale-epoch state cannot arrive after this reset and be misread.
                 queued = 0
+                lastReady = emptyList()
+                playingIndex = null
                 _uiState.value = ReaderUiState.ReadingPage
             }
 
             is PipelineState.Preparing -> {
-                queue(state.ready)
-                _uiState.value = ReaderUiState.PreparingVoices(state.ready.size, state.total)
+                if (mode == ReadingMode.Auto) queue(state.ready)
+                lastReady = state.ready
+                _uiState.value = playingState(state.units, state.ready, state.badges)
             }
 
             is PipelineState.Ready -> {
@@ -83,13 +115,15 @@ class ReaderViewModel @Inject constructor(
                 // first state this collector ever observes. Either way, queue()
                 // must pick up whatever is still unqueued, and endOfPage() must be
                 // called every time so PagePlayerImpl can trust a starved playlist
-                // as Finished rather than merely under-supplied.
-                queue(state.units)
-                player.endOfPage()
-                _uiState.value = ReaderUiState.Playing(
-                    state.units.map { ReaderUiState.Line(it.unit.speaker, it.unit.text) },
-                    playback,
-                )
+                // as Finished rather than merely under-supplied. Tap mode never
+                // queues or calls endOfPage() on its own — a tap is the only thing
+                // that plays anything in that mode.
+                if (mode == ReadingMode.Auto) {
+                    queue(state.units)
+                    player.endOfPage()
+                }
+                lastReady = state.units
+                _uiState.value = playingState(state.units.map { it.unit }, state.units, state.badges)
             }
 
             is PipelineState.Failed -> {
@@ -128,6 +162,46 @@ class ReaderViewModel @Inject constructor(
             fresh.forEach(player::append)
         }
         queued = ready.size
+    }
+
+    /** Every unit renders; only the synthesized ones are tappable. */
+    private fun playingState(
+        all: List<SpeechUnit>,
+        ready: List<PreparedUnit>,
+        badges: Map<String, Badge>,
+    ): ReaderUiState.Playing {
+        val readyIndices = ready.mapTo(mutableSetOf()) { it.unit.index }
+        return ReaderUiState.Playing(
+            lines = all.map { u ->
+                ReaderUiState.Line(
+                    index = u.index,
+                    speaker = u.speaker,
+                    text = u.text,
+                    // badges omits the narrator entirely rather than mapping it to
+                    // None, so NARRATOR must short-circuit before the lookup -
+                    // badges.getValue(speaker) would throw for every narrator line.
+                    badge = if (u.speaker == NARRATOR) Badge.None else badges[u.speaker] ?: Badge.None,
+                    enabled = mode == ReadingMode.Auto || u.index in readyIndices,
+                )
+            },
+            playback = playback,
+            mode = mode,
+            playingIndex = playingIndex,
+        )
+    }
+
+    /**
+     * A one-unit playlist plus an immediate endOfPage(): the player needs no new
+     * API for tap mode, and a tap while something plays REPLACES it, which is
+     * what a child tapping a new row means.
+     */
+    fun onLineTapped(index: Int) {
+        if (mode != ReadingMode.Tap) return
+        val prepared = lastReady.firstOrNull { it.unit.index == index } ?: return
+        playingIndex = index
+        player.play(listOf(prepared))
+        player.endOfPage()
+        (_uiState.value as? ReaderUiState.Playing)?.let { _uiState.value = it.copy(playingIndex = index) }
     }
 
     fun onRetry() {

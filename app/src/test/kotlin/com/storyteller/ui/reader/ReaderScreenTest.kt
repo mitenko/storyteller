@@ -7,7 +7,9 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import com.storyteller.domain.model.Badge
 import com.storyteller.domain.model.PlaybackState
+import com.storyteller.domain.model.ReadingMode
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -21,6 +23,17 @@ class ReaderScreenTest {
 
     @get:Rule val compose = createComposeRule()
 
+    /**
+     * These fixtures only fill the fields Task 8 added (badge, enabled, mode,
+     * playingIndex) with neutral defaults — this file's own rendering of badges,
+     * tap handling and highlighting is Task 9's job, not this task's.
+     */
+    private fun line(speaker: String, text: String, index: Int = 0) =
+        ReaderUiState.Line(index, speaker, text, Badge.None, enabled = true)
+
+    private fun playing(lines: List<ReaderUiState.Line>, playback: PlaybackState) =
+        ReaderUiState.Playing(lines, playback, ReadingMode.Auto, playingIndex = null)
+
     @Test fun `shows progress while preparing voices`() {
         compose.setContent {
             ReaderContent(ReaderUiState.PreparingVoices(2, 5), onRetry = {}, onBack = {})
@@ -30,12 +43,12 @@ class ReaderScreenTest {
 
     @Test fun `lists speakers and lines in order`() {
         val lines = listOf(
-            ReaderUiState.Line("Narrator", "Once upon a time,"),
-            ReaderUiState.Line("Wolf", "Get away!"),
+            line("Narrator", "Once upon a time,", index = 0),
+            line("Wolf", "Get away!", index = 1),
         )
         compose.setContent {
             ReaderContent(
-                ReaderUiState.Playing(lines, PlaybackState.Playing),
+                playing(lines, PlaybackState.Playing),
                 onRetry = {},
                 onBack = {},
             )
@@ -56,8 +69,8 @@ class ReaderScreenTest {
         var backs = 0
         compose.setContent {
             ReaderContent(
-                ReaderUiState.Playing(
-                    listOf(ReaderUiState.Line("Wolf", "Get away!")),
+                playing(
+                    listOf(line("Wolf", "Get away!")),
                     PlaybackState.Playing,
                 ),
                 onRetry = {},
@@ -72,8 +85,8 @@ class ReaderScreenTest {
     @Test fun `a finished page says so`() {
         compose.setContent {
             ReaderContent(
-                ReaderUiState.Playing(
-                    listOf(ReaderUiState.Line("Wolf", "Get away!")),
+                playing(
+                    listOf(line("Wolf", "Get away!")),
                     PlaybackState.Finished,
                 ),
                 onRetry = {},
@@ -86,8 +99,8 @@ class ReaderScreenTest {
     @Test fun `a page still playing does not say it has ended`() {
         compose.setContent {
             ReaderContent(
-                ReaderUiState.Playing(
-                    listOf(ReaderUiState.Line("Wolf", "Get away!")),
+                playing(
+                    listOf(line("Wolf", "Get away!")),
                     PlaybackState.Playing,
                 ),
                 onRetry = {},
@@ -127,7 +140,7 @@ class ReaderScreenTest {
      */
     @Test fun `disposing the composition does not stop playback`() {
         val player = FakePlayer()
-        val viewModel = ReaderViewModel(FakePipeline(), player)
+        val viewModel = ReaderViewModel(FakePipeline(), player, FakeSettingsRepository())
         var attached by mutableStateOf(true)
 
         compose.setContent { if (attached) ReaderScreen(onBack = {}, viewModel = viewModel) }
