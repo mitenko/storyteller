@@ -57,25 +57,41 @@ class AudioRepositoryImpl(
 
     private val locks = ConcurrentHashMap<String, Mutex>()
 
-    override suspend fun audioFor(text: String, voiceId: String): Result<File> {
+    /**
+     * The whole body - including the uncontended cache lookup that used to sit in
+     * front of the try - is inside the try. Room can throw from dao.find(): disk
+     * full, corrupt database, an interrupted thread. A throw from outside the try
+     * escapes a Result-returning function entirely; ReadingPipelineImpl catches
+     * Throwable so it would not crash the app, but it maps whatever it catches to
+     * FailureReason.Synthesis, so a database fault reached a child as "Couldn't
+     * make the voices for this page." Cancellation is caught first and rethrown.
+     */
+    override suspend fun audioFor(text: String, voiceId: String): Result<File> = try {
+        Result.success(resolve(text, voiceId))
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Throwable) {
+        Result.failure(e)
+    }
+
+    private suspend fun resolve(text: String, voiceId: String): File {
         val key = sha256("$voiceId|$text")
 
-        cached(key)?.let { return Result.success(it) }
+        cached(key)?.let { return it }
 
         val lock = locks.computeIfAbsent(key) { Mutex() }
         return lock.withLock {
             // Another caller for this exact key may have finished synthesizing
             // while we were waiting for the lock; re-check before paying for a
             // second synthesis.
-            cached(key)?.let { return@withLock Result.success(it) }
-            try {
-                Result.success(synthesize(key, text, voiceId))
-            } catch (e: CancellationException) {
+            cached(key) ?: try {
+                synthesize(key, text, voiceId)
+            } catch (e: Throwable) {
+                // Covers cancellation too: the partial file is cleaned up and the
+                // throwable rethrown untouched, so audioFor above still rethrows
+                // CancellationException and turns everything else into a failure.
                 cleanUpPartial(key)
                 throw e
-            } catch (e: Throwable) {
-                cleanUpPartial(key)
-                Result.failure(e)
             }
         }
     }

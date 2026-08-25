@@ -21,24 +21,30 @@ class VoiceRepositoryImpl(
     // and hand the same character two different voices.
     private val lock = Mutex()
 
-    override suspend fun voiceFor(character: String): Result<String> {
-        voiceDao.find(character)?.let { return Result.success(it.voiceId) }
-        return try {
-            Result.success(
-                lock.withLock {
-                    voiceDao.find(character)?.let { return@withLock it.voiceId }
-                    val pool = voicePool()
-                    require(pool.isNotEmpty()) { "ElevenLabs returned no voices" }
-                    val chosen = pool[random.nextInt(pool.size)]
-                    voiceDao.upsert(CharacterVoiceEntity(character, chosen))
-                    chosen
-                }
-            )
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Throwable) {
-            Result.failure(e)
-        }
+    /**
+     * The uncontended DAO lookup is INSIDE the try, not before it. Room can throw
+     * from that lookup - disk full, corrupt database, an interrupted thread - and
+     * a throw from outside the try escapes a Result-returning function entirely.
+     * ReadingPipelineImpl catches Throwable so it would not crash the app, but it
+     * maps anything it catches to FailureReason.Synthesis, so a database fault
+     * reached a child as "Couldn't make the voices for this page." Cancellation is
+     * still caught first and rethrown.
+     */
+    override suspend fun voiceFor(character: String): Result<String> = try {
+        Result.success(
+            voiceDao.find(character)?.voiceId ?: lock.withLock {
+                voiceDao.find(character)?.let { return@withLock it.voiceId }
+                val pool = voicePool()
+                require(pool.isNotEmpty()) { "ElevenLabs returned no voices" }
+                val chosen = pool[random.nextInt(pool.size)]
+                voiceDao.upsert(CharacterVoiceEntity(character, chosen))
+                chosen
+            },
+        )
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Throwable) {
+        Result.failure(e)
     }
 
     private suspend fun voicePool(): List<String> {

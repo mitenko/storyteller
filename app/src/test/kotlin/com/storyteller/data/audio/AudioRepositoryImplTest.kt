@@ -1,8 +1,11 @@
 package com.storyteller.data.audio
 
 import android.content.Context
+import android.database.sqlite.SQLiteException
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import com.storyteller.data.local.CachedAudioDao
+import com.storyteller.data.local.CachedAudioEntity
 import com.storyteller.data.local.StorytellerDatabase
 import com.storyteller.data.sha256
 import kotlinx.coroutines.Dispatchers
@@ -185,5 +188,28 @@ class AudioRepositoryImplTest {
         withTimeout(5_000) { job.cancelAndJoin() }
         assertTrue(job.isCancelled)
         assertNull("cancellation must propagate, not resolve to a Result", result)
+    }
+
+    /**
+     * The cache lookup used to sit in front of the try, so a Room fault on it threw
+     * straight out of a Result-returning function. ReadingPipelineImpl catches
+     * Throwable, so the app did not crash - it told the child "Couldn't make the
+     * voices for this page" for what is actually a disk fault.
+     */
+    @Test fun `a database fault on the cache lookup becomes a failure, not a throw`() = runTest {
+        val repo = AudioRepositoryImpl(api, ThrowingAudioDao, tmp.newFolder("throwing"))
+
+        val result = repo.audioFor("Get away!", "v-antoni")
+
+        assertTrue("must not throw out of audioFor", result.isFailure)
+        assertTrue(result.exceptionOrNull() is SQLiteException)
+        assertEquals("a failing lookup must not reach the network", 0, server.requestCount)
+    }
+
+    private object ThrowingAudioDao : CachedAudioDao {
+        override suspend fun find(key: String): CachedAudioEntity =
+            throw SQLiteException("disk I/O error")
+
+        override suspend fun upsert(entity: CachedAudioEntity) = Unit
     }
 }

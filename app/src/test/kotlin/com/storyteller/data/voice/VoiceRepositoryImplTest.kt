@@ -1,9 +1,12 @@
 package com.storyteller.data.voice
 
 import android.content.Context
+import android.database.sqlite.SQLiteException
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import com.storyteller.data.local.CharacterVoiceEntity
 import com.storyteller.data.local.StorytellerDatabase
+import com.storyteller.data.local.VoiceDao
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
@@ -93,7 +96,10 @@ class VoiceRepositoryImplTest {
         assertTrue(result.isFailure)
     }
 
-    @Test fun `sends the api key header`() = runTest {
+    // Renamed from "sends the api key header": it inspects no header at all, only
+    // the request path, so the old name was a false label. The x-api-key /
+    // xi-api-key headers are covered for real in NetworkModuleTest.
+    @Test fun `hits the voices endpoint`() = runTest {
         server.enqueue(MockResponse(body = body))
         repo().voiceFor("Wolf").getOrThrow()
         assertEquals("/v1/voices", server.takeRequest().target)
@@ -124,5 +130,28 @@ class VoiceRepositoryImplTest {
         withTimeout(5_000) { job.cancelAndJoin() }
         assertTrue(job.isCancelled)
         assertNull("cancellation must propagate, not resolve to a Result", result)
+    }
+
+    /**
+     * The uncontended voiceDao.find() used to sit in front of the try, so a Room
+     * fault on it threw straight out of a Result-returning function and was
+     * reported to the child as a synthesis failure by the pipeline's catch-all.
+     */
+    @Test fun `a database fault on the voice lookup becomes a failure, not a throw`() = runTest {
+        val repo = VoiceRepositoryImpl(api, ThrowingVoiceDao, db.voiceListDao(), Random(42))
+
+        val result = repo.voiceFor("Wolf")
+
+        assertTrue("must not throw out of voiceFor", result.isFailure)
+        assertTrue(result.exceptionOrNull() is SQLiteException)
+        assertEquals("a failing lookup must not reach the network", 0, server.requestCount)
+    }
+
+    private object ThrowingVoiceDao : VoiceDao {
+        override suspend fun find(character: String): CharacterVoiceEntity =
+            throw SQLiteException("disk I/O error")
+
+        override suspend fun count(): Int = 0
+        override suspend fun upsert(entity: CharacterVoiceEntity) = Unit
     }
 }
