@@ -77,7 +77,7 @@ class ReadingPipelineImpl(
             job = scope.launch {
                 guarded(myEpoch) {
                     if (cached != null) {
-                        setState(myEpoch, PipelineState.Preparing(ready = emptyList(), total = cached.size))
+                        setState(myEpoch, PipelineState.Preparing(cached, ready = emptyList()))
                         prepareAll(cached, myEpoch)
                     } else {
                         run(image, myEpoch)
@@ -143,7 +143,7 @@ class ReadingPipelineImpl(
         }
 
         synchronized(lock) { if (epoch == myEpoch) parsed = units }
-        setState(myEpoch, PipelineState.Preparing(ready = emptyList(), total = units.size))
+        setState(myEpoch, PipelineState.Preparing(units, ready = emptyList()))
         prepareAll(units, myEpoch)
     }
 
@@ -164,7 +164,7 @@ class ReadingPipelineImpl(
                 return@coroutineScope
             }
             ready += prepared
-            setState(myEpoch, PipelineState.Preparing(ready.toList(), units.size))
+            setState(myEpoch, PipelineState.Preparing(units, ready.toList()))
         }
         setState(myEpoch, PipelineState.Ready(ready.toList()))
     }

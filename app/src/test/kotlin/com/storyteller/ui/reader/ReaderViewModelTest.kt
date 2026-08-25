@@ -81,6 +81,10 @@ class ReaderViewModelTest {
         audio = File("/tmp/$index.mp3"),
     )
 
+    /** Placeholder units standing in for a page of [total] lines; only the count matters here. */
+    private fun units(total: Int): List<SpeechUnit> =
+        List(total) { SpeechUnit(it, "Wolf", "line $it", null) }
+
     @Test fun `maps pipeline states to reader states`() = runTest(dispatcher) {
         val pipeline = FakePipeline()
         val vm = ReaderViewModel(pipeline, FakePlayer())
@@ -89,7 +93,7 @@ class ReaderViewModelTest {
         runCurrent()
         assertEquals(ReaderUiState.ReadingPage, vm.uiState.value)
 
-        pipeline.states.value = PipelineState.Preparing(listOf(prepared(0)), total = 3)
+        pipeline.states.value = PipelineState.Preparing(units(3), ready = listOf(prepared(0)))
         runCurrent()
         assertEquals(ReaderUiState.PreparingVoices(ready = 1, total = 3), vm.uiState.value)
 
@@ -106,12 +110,12 @@ class ReaderViewModelTest {
             val player = FakePlayer()
             ReaderViewModel(pipeline, player)
 
-            pipeline.states.value = PipelineState.Preparing(listOf(prepared(0)), 3)
+            pipeline.states.value = PipelineState.Preparing(units(3), listOf(prepared(0)))
             runCurrent()
-            pipeline.states.value = PipelineState.Preparing(listOf(prepared(0), prepared(1)), 3)
+            pipeline.states.value = PipelineState.Preparing(units(3), listOf(prepared(0), prepared(1)))
             runCurrent()
             pipeline.states.value =
-                PipelineState.Preparing(listOf(prepared(0), prepared(1), prepared(2)), 3)
+                PipelineState.Preparing(units(3), listOf(prepared(0), prepared(1), prepared(2)))
             runCurrent()
 
             assertEquals("first unit starts playback", listOf(0), player.played)
@@ -124,7 +128,7 @@ class ReaderViewModelTest {
             val player = FakePlayer()
             ReaderViewModel(pipeline, player)
 
-            pipeline.states.value = PipelineState.Preparing(listOf(prepared(0), prepared(1)), 2)
+            pipeline.states.value = PipelineState.Preparing(units(2), listOf(prepared(0), prepared(1)))
             runCurrent()
             pipeline.states.value = PipelineState.Ready(listOf(prepared(0), prepared(1)))
             runCurrent()
@@ -159,7 +163,7 @@ class ReaderViewModelTest {
             val player = FakePlayer()
             ReaderViewModel(pipeline, player)
 
-            pipeline.states.value = PipelineState.Preparing(listOf(prepared(0), prepared(1)), 3)
+            pipeline.states.value = PipelineState.Preparing(units(3), listOf(prepared(0), prepared(1)))
             runCurrent()
             pipeline.states.value =
                 PipelineState.Ready(listOf(prepared(0), prepared(1), prepared(2)))
@@ -205,7 +209,7 @@ class ReaderViewModelTest {
             ReaderViewModel(pipeline, player)
 
             // Page one, start to finish.
-            pipeline.states.value = PipelineState.Preparing(listOf(prepared(0), prepared(1)), 2)
+            pipeline.states.value = PipelineState.Preparing(units(2), listOf(prepared(0), prepared(1)))
             runCurrent()
             pipeline.states.value = PipelineState.Ready(listOf(prepared(0), prepared(1)))
             runCurrent()
@@ -215,7 +219,7 @@ class ReaderViewModelTest {
             // units of its own.
             pipeline.states.value = PipelineState.Reading
             runCurrent()
-            pipeline.states.value = PipelineState.Preparing(listOf(prepared(0), prepared(1)), 2)
+            pipeline.states.value = PipelineState.Preparing(units(2), listOf(prepared(0), prepared(1)))
             runCurrent()
             pipeline.states.value = PipelineState.Ready(listOf(prepared(0), prepared(1)))
             runCurrent()

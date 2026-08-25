@@ -36,3 +36,17 @@ fun List<ParsedUnit>.toSpeechUnits(): List<SpeechUnit> =
                 bounds = p.bounds,
             )
         }
+
+/** A character on the page, with whatever identity the model could supply. */
+data class ParsedCharacter(
+    val name: String,
+    val emoji: String?,
+    /** The character AS DRAWN — not the speech bubble. Normalized 0..1. */
+    val bounds: BoundingBox?,
+)
+
+/** One page's parse: what is said, and who is on the page. */
+data class ParsedPage(
+    val units: List<SpeechUnit>,
+    val characters: List<ParsedCharacter>,
+)
