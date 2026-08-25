@@ -1,9 +1,12 @@
 package com.storyteller.domain
 
+import com.storyteller.domain.model.Badge
 import com.storyteller.domain.model.PageImage
+import com.storyteller.domain.model.ParsedCharacter
 import com.storyteller.domain.model.ParsedPage
 import com.storyteller.domain.model.SpeechUnit
 import com.storyteller.domain.repository.AudioRepository
+import com.storyteller.domain.repository.BadgeRepository
 import com.storyteller.domain.repository.PageReader
 import com.storyteller.domain.repository.VoiceRepository
 import kotlinx.coroutines.delay
@@ -62,5 +65,16 @@ class FakeAudioRepository(
         } finally {
             lock.withLock { inFlight-- }
         }
+    }
+}
+
+/** Returns [result] or, when [throwing], throws instead — badge resolution must never cost the page. */
+class FakeBadgeRepository(
+    private val result: Map<String, Badge> = emptyMap(),
+    private val throwing: Boolean = false,
+) : BadgeRepository {
+    override suspend fun badgesFor(image: PageImage, characters: List<ParsedCharacter>): Map<String, Badge> {
+        if (throwing) throw IllegalStateException("badge lookup blew up")
+        return result
     }
 }

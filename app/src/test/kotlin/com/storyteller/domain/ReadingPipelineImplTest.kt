@@ -1,12 +1,14 @@
 package com.storyteller.domain
 
 import app.cash.turbine.test
+import com.storyteller.domain.model.Badge
 import com.storyteller.domain.model.PipelineState
 import com.storyteller.domain.model.FailureReason
 import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.ParsedPage
 import com.storyteller.domain.model.SpeechUnit
 import com.storyteller.domain.repository.AudioRepository
+import com.storyteller.domain.repository.BadgeRepository
 import com.storyteller.domain.repository.PageReader
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -31,12 +33,35 @@ import java.io.File
 @OptIn(ExperimentalCoroutinesApi::class)
 class ReadingPipelineImplTest {
 
+    /** Populated by [pipelineWith] for tests that assert on the whole state history. */
+    private val states = mutableListOf<PipelineState>()
+
     private fun pipeline(
         reader: FakePageReader,
         audio: FakeAudioRepository,
         voices: FakeVoiceRepository = FakeVoiceRepository(),
         scope: TestScope,
-    ) = ReadingPipelineImpl(reader, voices, audio, scope)
+    ) = ReadingPipelineImpl(reader, voices, audio, FakeBadgeRepository(), scope)
+
+    /**
+     * Builds a pipeline over [units] speech units with default fakes, recording
+     * every emitted state into [states] for the duration of the test.
+     */
+    private fun TestScope.pipelineWith(
+        units: Int,
+        badges: Map<String, Badge> = emptyMap(),
+        badgesThrow: Boolean = false,
+    ): ReadingPipelineImpl {
+        val reader = FakePageReader(Result.success((0 until units).map { speechUnit(it) }))
+        val badgeRepo = FakeBadgeRepository(badges, badgesThrow)
+        val p = ReadingPipelineImpl(reader, FakeVoiceRepository(), FakeAudioRepository(), badgeRepo, this)
+        // Unconfined: a StandardTestDispatcher collector can miss the terminal
+        // emission (a queued resume that never gets its turn before the test
+        // body inspects `states`); Unconfined resumes inline on every emission,
+        // same as the file's other manual state-collection tests.
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { p.state.collect { states += it } }
+        return p
+    }
 
     @Test
     fun `surfaces units in reading order even when synthesis finishes out of order`() = runTest {
@@ -122,10 +147,37 @@ class ReadingPipelineImplTest {
 
     // ---- Hardening: a thrown (not returned) repository fault must terminate ----
 
+    @Test fun `preparing carries every unit so the reader can grey out the rest`() = runTest {
+        val pipeline = pipelineWith(units = 3)
+        pipeline.start(pageImage())
+        advanceUntilIdle()
+
+        val seen = states.filterIsInstance<PipelineState.Preparing>()
+        assertTrue("expected at least one Preparing", seen.isNotEmpty())
+        seen.forEach { assertEquals(3, it.units.size) }
+    }
+
+    @Test fun `ready carries the badges resolved for the page`() = runTest {
+        val pipeline = pipelineWith(units = 1, badges = mapOf("Bear" to Badge.Emoji("🐻")))
+        pipeline.start(pageImage())
+        advanceUntilIdle()
+
+        val ready = states.filterIsInstance<PipelineState.Ready>().last()
+        assertEquals(Badge.Emoji("🐻"), ready.badges.getValue("Bear"))
+    }
+
+    @Test fun `a badge failure does not fail the page`() = runTest {
+        val pipeline = pipelineWith(units = 1, badgesThrow = true)
+        pipeline.start(pageImage())
+        advanceUntilIdle()
+
+        assertTrue(states.last() is PipelineState.Ready)
+    }
+
     @Test
     fun `a synthesis repository that throws still reaches a terminal Failed`() = runTest {
         val reader = FakePageReader(Result.success((0..2).map { speechUnit(it) }))
-        val p = ReadingPipelineImpl(reader, FakeVoiceRepository(), ThrowingAudioRepository(), this)
+        val p = ReadingPipelineImpl(reader, FakeVoiceRepository(), ThrowingAudioRepository(), FakeBadgeRepository(), this)
 
         p.state.test {
             skipItems(1)
@@ -140,7 +192,7 @@ class ReadingPipelineImplTest {
 
     @Test
     fun `a page reader that throws still reaches a terminal Failed`() = runTest {
-        val p = ReadingPipelineImpl(ThrowingPageReader(), FakeVoiceRepository(), FakeAudioRepository(), this)
+        val p = ReadingPipelineImpl(ThrowingPageReader(), FakeVoiceRepository(), FakeAudioRepository(), FakeBadgeRepository(), this)
 
         p.state.test {
             skipItems(1)
@@ -156,7 +208,7 @@ class ReadingPipelineImplTest {
     @Test
     fun `a spurious CancellationException from a repository still reaches Failed`() = runTest {
         val reader = FakePageReader(Result.success((0..2).map { speechUnit(it) }))
-        val p = ReadingPipelineImpl(reader, FakeVoiceRepository(), CancellingAudioRepository(), this)
+        val p = ReadingPipelineImpl(reader, FakeVoiceRepository(), CancellingAudioRepository(), FakeBadgeRepository(), this)
 
         p.state.test {
             skipItems(1)
@@ -171,7 +223,7 @@ class ReadingPipelineImplTest {
 
     @Test
     fun `a spurious CancellationException from the reader still reaches Failed`() = runTest {
-        val p = ReadingPipelineImpl(CancellingPageReader(), FakeVoiceRepository(), FakeAudioRepository(), this)
+        val p = ReadingPipelineImpl(CancellingPageReader(), FakeVoiceRepository(), FakeAudioRepository(), FakeBadgeRepository(), this)
 
         p.state.test {
             skipItems(1)
@@ -191,6 +243,7 @@ class ReadingPipelineImplTest {
             SlowPageReader((0..2).map { speechUnit(it) }),
             FakeVoiceRepository(),
             FakeAudioRepository(),
+            FakeBadgeRepository(),
             this,
         )
 
@@ -290,6 +343,7 @@ class ReadingPipelineImplTest {
                     FakePageReader(Result.success(units)),
                     FakeVoiceRepository(),
                     FakeAudioRepository(delays = units.associate { it.text to 30L }),
+                    FakeBadgeRepository(),
                     scope,
                 )
                 p.start(pageImage())

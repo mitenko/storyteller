@@ -9,11 +9,21 @@ sealed interface PipelineState {
     /**
      * [units] is every unit on the page, so the reader can show the whole page
      * greyed out while synthesis fills it in. [ready] is cumulative and ordered
-     * by index; consumers must diff, not replay.
+     * by index; consumers must diff, not replay. [badges] omits the narrator key
+     * entirely — look up with `badges[speaker] ?: Badge.None`, never `getValue`.
      */
-    data class Preparing(val units: List<SpeechUnit>, val ready: List<PreparedUnit>) : PipelineState {
+    data class Preparing(
+        val units: List<SpeechUnit>,
+        val ready: List<PreparedUnit>,
+        val badges: Map<String, Badge> = emptyMap(),
+    ) : PipelineState {
         val total: Int get() = units.size
     }
-    data class Ready(val units: List<PreparedUnit>) : PipelineState
+
+    /** [badges] omits the narrator key entirely; see [Preparing]. */
+    data class Ready(
+        val units: List<PreparedUnit>,
+        val badges: Map<String, Badge> = emptyMap(),
+    ) : PipelineState
     data class Failed(val reason: FailureReason, val retryable: Boolean) : PipelineState
 }
