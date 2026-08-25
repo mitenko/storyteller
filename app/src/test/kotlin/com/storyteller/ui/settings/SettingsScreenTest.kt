@@ -1,5 +1,6 @@
 package com.storyteller.ui.settings
 
+import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -33,5 +34,14 @@ class SettingsScreenTest {
         compose.onNodeWithText("Tap each line to hear it").performClick()
 
         assertEquals(ReadingMode.Auto, chosen)
+    }
+
+    @Test fun `tapping the switch itself reports exactly one change`() {
+        val changes = mutableListOf<ReadingMode>()
+        compose.setContent { ReadingModeRow(ReadingMode.Auto, onChange = { changes += it }) }
+
+        compose.onNode(isToggleable()).performClick()
+
+        assertEquals(listOf(ReadingMode.Tap), changes)
     }
 }
