@@ -4,6 +4,8 @@ import com.storyteller.data.local.ParsedPageDao
 import com.storyteller.data.local.ParsedPageEntity
 import com.storyteller.data.page.ClaudeApi
 import com.storyteller.data.page.PageReaderImpl
+import com.storyteller.domain.model.BoundingBox
+import com.storyteller.domain.model.ParsedCharacter
 import com.storyteller.ui.capture.downscaleToPageImage
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
@@ -19,7 +21,73 @@ import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import java.io.File
 
 @Serializable
-private data class Expected(val speakers: List<String>, val minUnits: Int)
+private data class ExpectedBox(val left: Float, val top: Float, val right: Float, val bottom: Float)
+
+/**
+ * `bounds` is optional: a prose picture book's expected character carries
+ * only a name (and maybe `emojiExpected`) because there is no crop to
+ * hand-draw a box against — see evals/expected/README.md.
+ */
+@Serializable
+private data class ExpectedCharacter(val name: String, val emojiExpected: Boolean = false, val bounds: ExpectedBox? = null)
+
+@Serializable
+private data class Expected(val speakers: List<String>, val minUnits: Int, val characters: List<ExpectedCharacter> = emptyList())
+
+/** Pure input to [scoreCharacterBoxes] — decoupled from the JSON DTO so the scorer is testable without Robolectric. */
+internal data class ExpectedCharacterBox(val name: String, val bounds: BoundingBox?)
+
+/**
+ * Result of matching one fixture's expected characters against what the model
+ * actually returned. [found] counts expected characters that came back under
+ * the same name at all (boxed or not); [boxed] counts how many of those also
+ * carried a returned box; [ious] holds one IoU per character where BOTH a
+ * hand-drawn box and a returned box existed to compare.
+ */
+internal data class CharacterBoxScore(val expected: Int, val found: Int, val boxed: Int, val ious: List<Float>) {
+    val meanIou: Float? get() = if (ious.isEmpty()) null else ious.average().toFloat()
+}
+
+/**
+ * Intersection-over-union against a hand-drawn box. 0.5 is the usual
+ * detection threshold; a badge crop is padded by 10% and shown at 40dp, so
+ * it tolerates more slop than a hit target would - but below 0.5 the crop
+ * starts framing the wrong thing.
+ */
+internal fun iou(a: BoundingBox, b: BoundingBox): Float {
+    val x1 = maxOf(a.left, b.left)
+    val y1 = maxOf(a.top, b.top)
+    val x2 = minOf(a.right, b.right)
+    val y2 = minOf(a.bottom, b.bottom)
+    val inter = maxOf(0f, x2 - x1) * maxOf(0f, y2 - y1)
+    val areaA = (a.right - a.left) * (a.bottom - a.top)
+    val areaB = (b.right - b.left) * (b.bottom - b.top)
+    val union = areaA + areaB - inter
+    return if (union <= 0f) 0f else inter / union
+}
+
+/**
+ * Matches by name (trimmed, case-insensitive) rather than position, because
+ * the model's character list is not guaranteed to come back in the same
+ * order as the expected list was authored in.
+ */
+internal fun scoreCharacterBoxes(expected: List<ExpectedCharacterBox>, actual: List<ParsedCharacter>): CharacterBoxScore {
+    if (expected.isEmpty()) return CharacterBoxScore(expected = 0, found = 0, boxed = 0, ious = emptyList())
+
+    val byName = actual.associateBy { it.name.trim().lowercase() }
+    var found = 0
+    var boxed = 0
+    val ious = mutableListOf<Float>()
+    for (exp in expected) {
+        val match = byName[exp.name.trim().lowercase()] ?: continue
+        found++
+        val actualBounds = match.bounds ?: continue
+        boxed++
+        val expectedBounds = exp.bounds ?: continue
+        ious += iou(actualBounds, expectedBounds)
+    }
+    return CharacterBoxScore(expected = expected.size, found = found, boxed = boxed, ious = ious)
+}
 
 /**
  * Outcome of scoring one fixture against its expected/&lt;name&gt;.json, or the reason
@@ -131,6 +199,7 @@ class VisionEval {
         val reader = PageReaderImpl(api, noCache, json)
 
         val rows = mutableListOf<EvalRow>()
+        val allCharacterIous = mutableListOf<Float>()
         val report = StringBuilder("\n=== Vision eval ===\n")
 
         for (photo in fixtures) {
@@ -144,11 +213,12 @@ class VisionEval {
             // Downscaled here, not sent raw: see class doc. This is the same
             // transform CaptureViewModel applies to every real capture.
             val image = downscaleToPageImage(photo.readBytes())
-            val units = reader.read(image).getOrElse { e ->
+            val page = reader.read(image).getOrElse { e ->
                 report.append("ERROR ${photo.name} — ${e.message}\n")
                 rows += EvalRow(RowOutcome.ERROR)
                 continue
-            }.units
+            }
+            val units = page.units
 
             val speakers = units.map { it.speaker }.distinct().sorted()
             val speakersOk = speakers == expected.speakers.sorted()
@@ -157,16 +227,40 @@ class VisionEval {
             val passed = speakersOk && countOk
             rows += EvalRow(if (passed) RowOutcome.PASS else RowOutcome.FAIL, boxed = boxed > 0)
 
+            val expectedCharBoxes = expected.characters.map {
+                ExpectedCharacterBox(name = it.name, bounds = it.bounds?.let { b -> BoundingBox(b.left, b.top, b.right, b.bottom) })
+            }
+            val charScore = scoreCharacterBoxes(expectedCharBoxes, page.characters)
+            allCharacterIous += charScore.ious
+
             report.append(if (passed) "PASS  " else "FAIL  ")
                 .append(photo.name)
                 .append(" — units=").append(units.size).append("/min ").append(expected.minUnits)
                 .append(", speakers=").append(speakers)
                 .append(" expected=").append(expected.speakers.sorted())
                 .append(", boxed=").append(boxed).append("/").append(units.size)
-                .append('\n')
+            if (charScore.expected > 0) {
+                val iouStr = charScore.meanIou?.let { "%.3f".format(it) } ?: "n/a"
+                report.append(", characters=").append(charScore.found).append("/").append(charScore.expected)
+                    .append(" found, ").append(charScore.boxed).append("/").append(charScore.found)
+                    .append(" boxed, meanIoU=").append(iouStr)
+            }
+            report.append('\n')
         }
 
         report.append(tally(rows).summaryLine())
+        if (allCharacterIous.isNotEmpty()) {
+            report.append(
+                ("--- character box mean IoU across %d scored character(s): %.3f " +
+                    "(stop and report rather than proceed if below 0.50 - see evals/README.md) ---\n")
+                    .format(allCharacterIous.size, allCharacterIous.average()),
+            )
+        } else {
+            report.append(
+                "--- no character box comparisons available: no expected/*.json in this run supplied " +
+                    "both a hand-drawn box and a character the model actually returned ---\n",
+            )
+        }
         println(report)
     }
 }
