@@ -20,9 +20,13 @@ class CaptureViewModel @Inject constructor(
         _uiState.value = if (granted) CaptureUiState.Framing else CaptureUiState.PermissionRequired
     }
 
-    /** [jpeg] is the raw CameraX capture; downscaling happens here, at the boundary. */
-    fun onCaptured(jpeg: ByteArray) {
-        _uiState.value = CaptureUiState.Captured(downscaleToPageImage(jpeg))
+    /**
+     * [jpeg] is the raw CameraX capture; downscaling and uprighting happen here, at
+     * the boundary. [rotationDegrees] is ImageProxy.imageInfo.rotationDegrees - the
+     * only record of which way up the frame is, since the re-encode drops EXIF.
+     */
+    fun onCaptured(jpeg: ByteArray, rotationDegrees: Int = 0) {
+        _uiState.value = CaptureUiState.Captured(downscaleToPageImage(jpeg, rotationDegrees))
     }
 
     fun onRetake() {

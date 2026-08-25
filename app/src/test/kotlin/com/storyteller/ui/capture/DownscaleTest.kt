@@ -49,6 +49,20 @@ class DownscaleTest {
         assertEquals("image/jpeg", downscaleToPageImage(jpeg(200, 200)).mimeType)
     }
 
+    @Test fun `rotates a landscape capture upright when the sensor reports 90 degrees`() {
+        val out = downscaleToPageImage(jpeg(4000, 3000), rotationDegrees = 90)
+        val (w, h) = sizeOf(out.bytes)
+        assertEquals(1176, w)
+        assertEquals(1568, h)
+    }
+
+    @Test fun `rotates even when the image is small enough to skip downscaling`() {
+        val out = downscaleToPageImage(jpeg(800, 600), rotationDegrees = 90)
+        val (w, h) = sizeOf(out.bytes)
+        assertEquals(600, w)
+        assertEquals(800, h)
+    }
+
     @Test fun `output is smaller than the input for an oversized photo`() {
         val input = jpeg(4000, 3000)
         assertTrue(downscaleToPageImage(input).bytes.size < input.size)

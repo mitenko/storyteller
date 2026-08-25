@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -41,12 +42,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.storyteller.R
 import com.storyteller.domain.model.PageImage
 import java.util.concurrent.Executors
 
@@ -140,7 +143,8 @@ fun CaptureScreen(
 
                 AndroidView(modifier = Modifier.fillMaxSize(), factory = { previewView })
 
-                Button(
+                ShutterButton(
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(32.dp),
                     onClick = {
                         imageCapture.takePicture(
                             executor,
@@ -154,7 +158,7 @@ fun CaptureScreen(
                                         buffer.rewind()
                                         val bytes = ByteArray(buffer.remaining())
                                         buffer.get(bytes)
-                                        viewModel.onCaptured(bytes)
+                                        viewModel.onCaptured(bytes, image.imageInfo.rotationDegrees)
                                     } finally {
                                         image.close()
                                     }
@@ -166,8 +170,7 @@ fun CaptureScreen(
                             },
                         )
                     },
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(32.dp),
-                ) { Text("Take photo") }
+                )
             }
 
             is CaptureUiState.Captured -> CapturedPage(
@@ -176,6 +179,22 @@ fun CaptureScreen(
                 onConfirm = { confirmAndNavigate(viewModel, onNavigateToReader) },
             )
         }
+    }
+}
+
+/**
+ * The shutter. Stateless so it can be tested without a camera, a permission grant
+ * or Hilt - the Framing branch it lives in needs all three.
+ */
+@Composable
+internal fun ShutterButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Button(onClick = onClick, modifier = modifier) {
+        Icon(
+            painter = painterResource(R.drawable.ic_photo_camera),
+            // The only label left once the text is gone - without it the shutter is
+            // an unnamed button to TalkBack.
+            contentDescription = "Take photo",
+        )
     }
 }
 

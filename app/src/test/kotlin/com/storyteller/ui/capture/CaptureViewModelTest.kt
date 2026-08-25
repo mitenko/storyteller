@@ -1,6 +1,7 @@
 package com.storyteller.ui.capture
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import com.storyteller.domain.ReadingPipeline
 import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.PipelineState
@@ -64,6 +65,22 @@ class CaptureViewModelTest {
         assertEquals(1, pipeline.started.size)
         assertEquals("image/jpeg", pipeline.started.single().mimeType)
         assertTrue(pipeline.started.single().bytes.isNotEmpty())
+    }
+
+    @Test fun `a sideways capture reaches the pipeline upright`() = runTest {
+        val pipeline = RecordingPipeline()
+        val vm = CaptureViewModel(pipeline)
+        vm.onPermissionResult(true)
+        vm.onCaptured(jpeg(), rotationDegrees = 90)
+        vm.onConfirm()
+
+        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        val bytes = pipeline.started.single().bytes
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+        assertTrue(
+            "expected a portrait page, got ${opts.outWidth}x${opts.outHeight}",
+            opts.outHeight > opts.outWidth,
+        )
     }
 
     @Test fun `confirm before capture does nothing`() = runTest {

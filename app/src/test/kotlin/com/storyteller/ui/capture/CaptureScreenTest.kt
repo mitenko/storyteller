@@ -51,6 +51,15 @@ class CaptureScreenTest {
         assertEquals(1, confirms)
     }
 
+    @Test fun `the shutter is an icon that still announces itself to a screen reader`() {
+        var shots = 0
+        compose.setContent { ShutterButton(onClick = { shots++ }) }
+
+        compose.onNodeWithText("Take photo").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Take photo").performClick()
+        assertEquals(1, shots)
+    }
+
     @Test fun `a first denial still offers to ask again`() {
         var requests = 0
         compose.setContent {
