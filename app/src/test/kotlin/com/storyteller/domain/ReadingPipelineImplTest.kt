@@ -4,6 +4,7 @@ import app.cash.turbine.test
 import com.storyteller.domain.model.PipelineState
 import com.storyteller.domain.model.FailureReason
 import com.storyteller.domain.model.PageImage
+import com.storyteller.domain.model.ParsedPage
 import com.storyteller.domain.model.SpeechUnit
 import com.storyteller.domain.repository.AudioRepository
 import com.storyteller.domain.repository.PageReader
@@ -317,7 +318,7 @@ private class ThrowingAudioRepository : AudioRepository {
 }
 
 private class ThrowingPageReader : PageReader {
-    override suspend fun read(image: PageImage): Result<List<SpeechUnit>> =
+    override suspend fun read(image: PageImage): Result<ParsedPage> =
         throw java.io.IOException("socket closed")
 }
 
@@ -327,13 +328,13 @@ private class CancellingAudioRepository : AudioRepository {
 }
 
 private class CancellingPageReader : PageReader {
-    override suspend fun read(image: PageImage): Result<List<SpeechUnit>> =
+    override suspend fun read(image: PageImage): Result<ParsedPage> =
         throw CancellationException("spurious")
 }
 
 private class SlowPageReader(private val units: List<SpeechUnit>) : PageReader {
-    override suspend fun read(image: PageImage): Result<List<SpeechUnit>> {
+    override suspend fun read(image: PageImage): Result<ParsedPage> {
         delay(100)
-        return Result.success(units)
+        return Result.success(ParsedPage(units, emptyList()))
     }
 }

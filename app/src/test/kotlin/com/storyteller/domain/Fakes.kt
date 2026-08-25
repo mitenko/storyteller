@@ -1,6 +1,7 @@
 package com.storyteller.domain
 
 import com.storyteller.domain.model.PageImage
+import com.storyteller.domain.model.ParsedPage
 import com.storyteller.domain.model.SpeechUnit
 import com.storyteller.domain.repository.AudioRepository
 import com.storyteller.domain.repository.PageReader
@@ -15,11 +16,19 @@ fun speechUnit(index: Int, speaker: String = "Wolf", text: String = "line $index
 
 fun pageImage() = PageImage(byteArrayOf(1, 2, 3), "image/jpeg")
 
+/**
+ * Takes a plain `List<SpeechUnit>` result, not `ParsedPage`, so the many
+ * existing `FakePageReader(Result.success(units))` call sites across the
+ * pipeline tests don't need to change now that [PageReader.read] returns
+ * `Result<ParsedPage>`. Wraps with an empty characters list, since nothing
+ * here exercises page.characters yet (that's Task 5+).
+ */
 class FakePageReader(
-    var result: Result<List<SpeechUnit>> = Result.success(emptyList()),
+    unitsResult: Result<List<SpeechUnit>> = Result.success(emptyList()),
 ) : PageReader {
+    var result: Result<ParsedPage> = unitsResult.map { ParsedPage(it, emptyList()) }
     var calls = 0
-    override suspend fun read(image: PageImage): Result<List<SpeechUnit>> {
+    override suspend fun read(image: PageImage): Result<ParsedPage> {
         calls++
         return result
     }

@@ -6,8 +6,9 @@ import com.storyteller.data.local.ParsedPageEntity
 import com.storyteller.data.sha256
 import com.storyteller.domain.model.BoundingBox
 import com.storyteller.domain.model.PageImage
+import com.storyteller.domain.model.ParsedCharacter
+import com.storyteller.domain.model.ParsedPage
 import com.storyteller.domain.model.ParsedUnit
-import com.storyteller.domain.model.SpeechUnit
 import com.storyteller.domain.model.toSpeechUnits
 import com.storyteller.domain.repository.PageReader
 import kotlinx.coroutines.CancellationException
@@ -32,7 +33,10 @@ private data class BoundsDto(val left: Float, val top: Float, val right: Float, 
 private data class UnitDto(val speaker: String, val text: String, val bounds: BoundsDto?)
 
 @Serializable
-private data class PageDto(val units: List<UnitDto>)
+private data class CharacterDto(val name: String, val emoji: String?, val bounds: BoundsDto?)
+
+@Serializable
+private data class PageDto(val units: List<UnitDto>, val characters: List<CharacterDto> = emptyList())
 
 class PageReaderImpl(
     private val api: ClaudeApi,
@@ -46,7 +50,7 @@ class PageReaderImpl(
     // letting it propagate. ReadingPipelineImpl's cancel-in-flight-synthesis
     // hardening depends on cancellation actually reaching it. Cancellation is
     // caught first and rethrown; everything else becomes a Result.failure.
-    override suspend fun read(image: PageImage): Result<List<SpeechUnit>> = try {
+    override suspend fun read(image: PageImage): Result<ParsedPage> = try {
         Result.success(readOrThrow(image))
     } catch (e: CancellationException) {
         throw e
@@ -54,7 +58,7 @@ class PageReaderImpl(
         Result.failure(e)
     }
 
-    private suspend fun readOrThrow(image: PageImage): List<SpeechUnit> {
+    private suspend fun readOrThrow(image: PageImage): ParsedPage {
         val hash = sha256(image.bytes)
 
         parsedPageDao.find(hash)?.let { cached ->
@@ -121,19 +125,19 @@ class PageReaderImpl(
             .first { it["type"]?.jsonPrimitive?.content == "text" }["text"]!!
             .jsonPrimitive.content
 
-    private fun PageDto.toDomain(): List<SpeechUnit> =
-        units.map { u ->
-            ParsedUnit(
-                speaker = u.speaker,
-                text = u.text,
-                bounds = u.bounds?.let {
-                    BoundingBox(
-                        left = it.left.coerceIn(0f, 1f),
-                        top = it.top.coerceIn(0f, 1f),
-                        right = it.right.coerceIn(0f, 1f),
-                        bottom = it.bottom.coerceIn(0f, 1f),
-                    )
-                },
-            )
-        }.toSpeechUnits()
+    private fun BoundsDto.toDomain(): BoundingBox = BoundingBox(
+        left = left.coerceIn(0f, 1f),
+        top = top.coerceIn(0f, 1f),
+        right = right.coerceIn(0f, 1f),
+        bottom = bottom.coerceIn(0f, 1f),
+    )
+
+    private fun PageDto.toDomain(): ParsedPage = ParsedPage(
+        units = units.map { u ->
+            ParsedUnit(speaker = u.speaker, text = u.text, bounds = u.bounds?.toDomain())
+        }.toSpeechUnits(),
+        characters = characters.map { c ->
+            ParsedCharacter(name = c.name, emoji = c.emoji?.takeIf { it.isNotBlank() }, bounds = c.bounds?.toDomain())
+        },
+    )
 }

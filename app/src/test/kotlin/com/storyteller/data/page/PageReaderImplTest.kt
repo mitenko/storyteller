@@ -74,6 +74,26 @@ class PageReaderImplTest {
         return MockResponse(body = body.toString())
     }
 
+    /**
+     * Enqueues a well-formed structured-outputs response carrying [payload] verbatim
+     * as the text block, with no wrapping. Unlike [okResponse] (which always wraps
+     * its argument as the value of a top-level "units" key), this lets a caller
+     * control the full top-level JSON object, e.g. to also carry "characters".
+     */
+    private fun enqueueTextBlock(payload: String) {
+        val body = buildJsonObject {
+            putJsonArray("content") {
+                add(
+                    buildJsonObject {
+                        put("type", "text")
+                        put("text", payload)
+                    },
+                )
+            }
+        }
+        server.enqueue(MockResponse(body = body.toString()))
+    }
+
     @Before fun setUp() {
         server = MockWebServer().apply { start() }
         api = Retrofit.Builder()
@@ -102,7 +122,7 @@ class PageReaderImplTest {
                 ]""",
             ),
         )
-        val units = reader().read(image(1, 2, 3)).getOrThrow()
+        val units = reader().read(image(1, 2, 3)).getOrThrow().units
 
         assertEquals(2, units.size)
         assertEquals(listOf(0, 1), units.map { it.index })
@@ -135,21 +155,21 @@ class PageReaderImplTest {
         val cached = r.read(image(9, 9)).getOrThrow()
 
         assertEquals(1, server.requestCount)
-        assertEquals("Hi", cached.single().text)
+        assertEquals("Hi", cached.units.single().text)
     }
 
     @Test fun `different bytes miss the cache`() = runTest {
         server.enqueue(okResponse("""[{"speaker":"A","text":"one","bounds":null}]"""))
         server.enqueue(okResponse("""[{"speaker":"B","text":"two","bounds":null}]"""))
         val r = reader()
-        assertEquals("one", r.read(image(1)).getOrThrow().single().text)
-        assertEquals("two", r.read(image(2)).getOrThrow().single().text)
+        assertEquals("one", r.read(image(1)).getOrThrow().units.single().text)
+        assertEquals("two", r.read(image(2)).getOrThrow().units.single().text)
         assertEquals(2, server.requestCount)
     }
 
     @Test fun `blank page yields an empty list rather than an error`() = runTest {
         server.enqueue(okResponse("[]"))
-        assertTrue(reader().read(image(1)).getOrThrow().isEmpty())
+        assertTrue(reader().read(image(1)).getOrThrow().units.isEmpty())
     }
 
     /**
@@ -170,7 +190,7 @@ class PageReaderImplTest {
         assertNotNull(failed.exceptionOrNull())
         // Nothing was parsed, so nothing may have been cached: the retry must call
         // the network again rather than replay a poisoned cache entry.
-        assertEquals("Hi", r.read(image(4, 2)).getOrThrow().single().text)
+        assertEquals("Hi", r.read(image(4, 2)).getOrThrow().units.single().text)
         assertEquals(2, server.requestCount)
     }
 
@@ -191,8 +211,8 @@ class PageReaderImplTest {
         )
         val r = reader()
 
-        val fresh = r.read(image(5, 5)).getOrThrow()
-        val hit = r.read(image(5, 5)).getOrThrow()
+        val fresh = r.read(image(5, 5)).getOrThrow().units
+        val hit = r.read(image(5, 5)).getOrThrow().units
 
         assertEquals("the second read must not call the network", 1, server.requestCount)
         assertEquals(fresh.map { it.index }, hit.map { it.index })
@@ -203,12 +223,38 @@ class PageReaderImplTest {
         assertNull(hit[0].bounds)
     }
 
+    @Test fun `parses page-level characters alongside units`() = runTest {
+        enqueueTextBlock(
+            """
+            {"units":[{"speaker":"Bear","text":"Hello","bounds":null}],
+             "characters":[{"name":"Bear","emoji":"🐻",
+                            "bounds":{"left":0.1,"top":0.1,"right":0.3,"bottom":0.4}}]}
+            """.trimIndent(),
+        )
+
+        val page = reader().read(image(1, 2, 3)).getOrThrow()
+
+        assertEquals(1, page.units.size)
+        assertEquals("Bear", page.characters.single().name)
+        assertEquals("🐻", page.characters.single().emoji)
+        assertEquals(0.3f, page.characters.single().bounds!!.right, 0.001f)
+    }
+
+    @Test fun `tolerates a page with no characters array entries`() = runTest {
+        enqueueTextBlock("""{"units":[{"speaker":"Narrator","text":"Once","bounds":null}],"characters":[]}""")
+
+        val page = reader().read(image(1, 2, 3)).getOrThrow()
+
+        assertEquals(1, page.units.size)
+        assertTrue(page.characters.isEmpty())
+    }
+
     @Test fun `http error is a failure and is not cached`() = runTest {
         server.enqueue(MockResponse(code = 529))
         server.enqueue(okResponse("""[{"speaker":"Wolf","text":"Hi","bounds":null}]"""))
         val r = reader()
         assertTrue(r.read(image(7)).isFailure)
-        assertEquals("Hi", r.read(image(7)).getOrThrow().single().text)
+        assertEquals("Hi", r.read(image(7)).getOrThrow().units.single().text)
     }
 
     // Regression for a defect this project has already hit twice (VoiceRepositoryImpl,
@@ -226,7 +272,7 @@ class PageReaderImplTest {
                 .build(),
         )
         val r = reader()
-        var result: Result<List<com.storyteller.domain.model.SpeechUnit>>? = null
+        var result: Result<com.storyteller.domain.model.ParsedPage>? = null
         val job = launch(Dispatchers.Default) {
             result = r.read(image(1, 2, 3))
         }

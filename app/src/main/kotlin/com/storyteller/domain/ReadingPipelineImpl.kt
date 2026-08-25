@@ -133,10 +133,12 @@ class ReadingPipelineImpl(
     private suspend fun run(image: PageImage, myEpoch: Long) {
         setState(myEpoch, PipelineState.Reading)
 
-        val units = pageReader.read(image).getOrElse { e ->
+        val page = pageReader.read(image).getOrElse { e ->
             setState(myEpoch, PipelineState.Failed(e.toReason(FailureReason.Network), retryable = true))
             return
         }
+        val units = page.units
+        // page.characters is not wired anywhere yet: badge resolution/cropping is Task 5.
         if (units.isEmpty()) {
             setState(myEpoch, PipelineState.Failed(FailureReason.NoTextFound, retryable = true))
             return

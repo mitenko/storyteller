@@ -147,7 +147,7 @@ class VisionEval {
                 report.append("ERROR ${photo.name} — ${e.message}\n")
                 rows += EvalRow(RowOutcome.ERROR)
                 continue
-            }
+            }.units
 
             val speakers = units.map { it.speaker }.distinct().sorted()
             val speakersOk = speakers == expected.speakers.sorted()

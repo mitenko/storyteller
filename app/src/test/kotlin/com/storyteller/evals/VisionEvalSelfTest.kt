@@ -82,7 +82,7 @@ class VisionEvalSelfTest {
         val image = downscaleToPageImage(raw)
         assertTrue("fixture must actually exceed the clamp for this test to mean anything", raw.size > image.bytes.size)
 
-        val units = PageReaderImpl(api, noCache, json).read(image).getOrThrow()
+        val units = PageReaderImpl(api, noCache, json).read(image).getOrThrow().units
 
         assertEquals(1, units.size)
         assertEquals("Hi", units[0].text)
