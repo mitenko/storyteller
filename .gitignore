@@ -33,9 +33,6 @@ lint/tmp/
 Thumbs.db
 desktop.ini
 
-# --- Tooling ---------------------------------------------------------------
-.claude/settings.local.json
-
 # --- Eval fixtures ---------------------------------------------------------
 # Photos of real book pages used by the vision eval harness: potentially
 # copyrighted material, and large. Keep them local.

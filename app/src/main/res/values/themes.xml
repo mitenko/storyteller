@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        MainActivity is a plain ComponentActivity, not an AppCompatActivity. Without
+        an explicit theme it inherits a DeviceDefault theme WITH an action bar, which
+        sits above the camera preview and steals the top of every screen. Compose
+        supplies all the real styling (StorytellerTheme), so this only has to remove
+        the action bar and paint a sensible window background under the first frame.
+    -->
+    <style name="Theme.Storyteller" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/storyteller_page</item>
+    </style>
+</resources>
