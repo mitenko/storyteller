@@ -8,15 +8,6 @@ sealed interface ReaderUiState {
     data object ReadingPage : ReaderUiState
 
     /**
-     * No longer produced by ReaderViewModel — Preparing now renders through
-     * [Playing] (every line, with unready ones simply disabled) so the reader has
-     * one shape for "showing the page" whether or not it is Auto or Tap. Retained
-     * only because ReaderScreen.kt (Task 9) still pattern-matches it; that
-     * composable is out of this task's scope.
-     */
-    data class PreparingVoices(val ready: Int, val total: Int) : ReaderUiState
-
-    /**
      * [playback] is the player's own state, mirrored here so the reader can show
      * the page has finished. Without it nothing outside PagePlayerImpl observed
      * PlaybackState at all, which made endOfPage(), the pageComplete gate and the

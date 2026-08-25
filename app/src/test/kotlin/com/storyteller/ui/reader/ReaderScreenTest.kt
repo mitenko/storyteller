@@ -34,13 +34,6 @@ class ReaderScreenTest {
     private fun playing(lines: List<ReaderUiState.Line>, playback: PlaybackState) =
         ReaderUiState.Playing(lines, playback, ReadingMode.Auto, playingIndex = null)
 
-    @Test fun `shows progress while preparing voices`() {
-        compose.setContent {
-            ReaderContent(ReaderUiState.PreparingVoices(2, 5), onRetry = {}, onBack = {})
-        }
-        compose.onNodeWithText("Getting voices ready… 2 of 5").assertIsDisplayed()
-    }
-
     @Test fun `lists speakers and lines in order`() {
         val lines = listOf(
             line("Narrator", "Once upon a time,", index = 0),
@@ -110,6 +103,28 @@ class ReaderScreenTest {
         compose.onNodeWithText("The End.").assertDoesNotExist()
     }
 
+    /**
+     * onLineTapped plays a one-unit playlist and immediately calls endOfPage(), so
+     * PlaybackState.Finished fires after every tapped line, not just the page's
+     * last one. In Auto mode that Finished genuinely means the page is done; in
+     * Tap mode it would falsely tell the child the story ended after one tap.
+     */
+    @Test fun `a tapped line finishing does not say the page has ended`() {
+        compose.setContent {
+            ReaderContent(
+                ReaderUiState.Playing(
+                    lines = listOf(line("Wolf", "Get away!")),
+                    playback = PlaybackState.Finished,
+                    mode = ReadingMode.Tap,
+                    playingIndex = 0,
+                ),
+                onRetry = {},
+                onBack = {},
+            )
+        }
+        compose.onNodeWithText("The End.").assertDoesNotExist()
+    }
+
     @Test fun `error state offers retry and invokes the callback`() {
         var retries = 0
         compose.setContent {
@@ -154,5 +169,33 @@ class ReaderScreenTest {
             0,
             player.stops,
         )
+    }
+
+    private fun lineRowFixture(index: Int = 0, enabled: Boolean = true, badge: Badge = Badge.None) =
+        ReaderUiState.Line(index, "Bear", "Hello there", badge, enabled)
+
+    @Test fun `an enabled row reports the index it was given`() {
+        var tapped: Int? = null
+        compose.setContent { LineRow(lineRowFixture(index = 2), isPlaying = false, onTap = { tapped = it }) }
+
+        compose.onNodeWithText("Hello there").performClick()
+
+        assertEquals(2, tapped)
+    }
+
+    @Test fun `a disabled row is inert`() {
+        var tapped: Int? = null
+        compose.setContent {
+            LineRow(lineRowFixture(enabled = false), isPlaying = false, onTap = { tapped = it })
+        }
+
+        compose.onNodeWithText("Hello there").performClick()
+
+        assertEquals(null, tapped)
+    }
+
+    @Test fun `an emoji badge renders`() {
+        compose.setContent { BadgeIcon(Badge.Emoji("🐻")) }
+        compose.onNodeWithText("🐻").assertIsDisplayed()
     }
 }
