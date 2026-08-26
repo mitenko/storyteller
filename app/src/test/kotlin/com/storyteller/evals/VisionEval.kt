@@ -60,9 +60,9 @@ private data class Expected(
 
 /**
  * Intersection-over-union against a hand-drawn box. 0.5 is the usual
- * detection threshold; a badge crop is padded by 10% and shown at 40dp, so
- * it tolerates more slop than a hit target would - but below 0.5 the crop
- * starts framing the wrong thing.
+ * detection threshold - a bubble crop IS the reader's content with no
+ * fallback UI to soften a bad box, so below 0.5 the crop starts framing the
+ * wrong thing and is treated as a stop condition (see evals/README.md).
  */
 internal fun iou(a: BoundingBox, b: BoundingBox): Float {
     val x1 = maxOf(a.left, b.left)
