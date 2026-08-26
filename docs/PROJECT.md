@@ -1,8 +1,8 @@
 # Storyteller — project notes
 
 A graphic novel / storybook reader for children. The user holds the phone over a
-book page; the app photographs it, works out who says what, and reads the page
-aloud with a different voice per character.
+book page; the app photographs it, works out who says what, and reads it aloud
+with a different voice per character, one speech bubble at a time.
 
 ## Platform
 
@@ -27,6 +27,9 @@ sequence and outlives the capture-to-reader navigation, so voice prefetch keeps
 running across it.
 
 Current design: `docs/superpowers/specs/2026-08-24-storyteller-compose-mvvm-design.md`
+(overall Compose/MVVM shape) and
+`docs/superpowers/specs/2026-08-26-storyteller-bubble-reader-design.md` (the
+one-bubble-at-a-time reader).
 
 ## Stack
 
@@ -44,21 +47,45 @@ That is fine for a personal build and NOT safe for a store release, since the ke
 are extractable from the APK. The seam for a key-holding proxy sits entirely in
 `data`.
 
-## Iteration 1 scope
+## What the app does today
 
 1. Photograph a book page, graphic novel or plain text
-2. Parse the page text
-3. Identify the characters and who speaks each line
-4. Assign a voice per character
-5. Read the whole page aloud, start to finish
+2. Parse the page text and attribute each line to a speaker in one vision call
+3. Assign a voice per character
+4. Show ONE speech bubble at a time — cropped out of the page photo around that
+   line's bounding box, falling back to plain text when there is no usable box
+   (a prose page, or a crop that fails) — with previous/next controls
+5. Read it aloud either automatically, straight through the page (**Auto**), or
+   one tapped bubble at a time (**Tap**) — a per-user setting in Settings,
+   alongside a three-way theme choice (System / Light / Dark)
 
-Deferred: tapping a speech bubble to replay it, selectable auto-read vs tap modes,
-LRU eviction and cache size caps, WiFi pre-checks, device-TTS fallback, multiple
-profiles, book recognition, user-editable voice assignments.
+Deferred: LRU eviction and cache size caps, WiFi pre-checks, device-TTS
+fallback, multiple profiles, book recognition, user-editable voice assignments.
 
-`SpeechUnit` carries an optional normalized bounding box that iteration 1 does not
-use. It is populated from day one so the accuracy of the coordinates is known
-before iteration 2 needs them for tappable bubbles.
+### What got deleted along the way
+
+- **The character "badge"** — a small cropped portrait shown per character —
+  and its Room column (`character_voice.badgePath`, added then dropped by a
+  migration; see `StorytellerDatabase.kt`).
+- **The `characters` array** the vision call used to return separately from
+  the per-line units — dropped from the JSON schema; speaker attribution now
+  comes entirely from each unit's own `speaker` field.
+- **The transcript list** — a scrollable list of every line on the page,
+  replaced by the one-bubble-at-a-time reader above.
+
+### Speech-bubble box accuracy is UNMEASURED
+
+`SpeechUnit.bounds` is what the reader crops a bubble out of, and the scoring
+machinery for it exists — `scoreBubbleBoxes`/`ExpectedBubble` in
+`app/src/test/kotlin/com/storyteller/evals/VisionEval.kt`, IoU against
+hand-drawn boxes, with a documented stop condition (mean IoU below 0.5 means
+the crop is regularly framing the wrong thing). But `evals/fixtures/` is empty
+in this checkout — no real book photos, no hand-drawn `bounds` in
+`evals/expected/*.json` — so that scoring code has never actually been run
+against real pages. Whether the model's boxes are usable is presently unknown;
+the reader's text fallback is silently doing an unknown amount of work. Adding
+fixtures and running the eval (see `evals/README.md`) is what would answer
+this, and nothing in the codebase currently depends on the answer being good.
 
 ## Cost notes
 
@@ -75,8 +102,10 @@ Most logic is JVM-testable and should stay that way. Device tests only for Camer
 and Media3. Vision accuracy is an eval harness over real book photos scored as a
 pass rate, not a pass/fail assertion — see `evals/README.md`.
 
-Two gaps worth knowing: no interactive device verification has been performed, and
-no real API call has ever been made by this code (`local.properties` is absent, so
-the suite runs against MockWebServer). The manual walkthrough in
-`docs/superpowers/plans/2026-08-24-storyteller-iteration-1.md` is the gate that
-closes both.
+Two gaps worth knowing: no interactive device verification has ever been performed,
+for either iteration, and no real API call has ever been made by this code
+(`local.properties` is absent, so the suite runs against MockWebServer). The manual
+walkthrough at the end of
+`docs/superpowers/plans/2026-08-26-storyteller-bubble-reader.md` is the current
+gate — it needs a real device, real keys, and a graphic novel, and none of those
+have been available yet.
