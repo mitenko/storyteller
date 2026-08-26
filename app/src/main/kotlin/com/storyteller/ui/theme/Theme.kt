@@ -1,10 +1,13 @@
 package com.storyteller.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import com.storyteller.domain.model.ThemeChoice
 
 /**
@@ -51,5 +54,14 @@ fun StorytellerTheme(choice: ThemeChoice = ThemeChoice.Dark, content: @Composabl
         ThemeChoice.Light -> false
         ThemeChoice.System -> isSystemInDarkTheme()
     }
-    MaterialTheme(colorScheme = if (dark) DarkColors else LightColors, content = content)
+    MaterialTheme(colorScheme = if (dark) DarkColors else LightColors) {
+        // The Surface is load-bearing, not decoration. MaterialTheme supplies a
+        // colour SCHEME but neither paints a ground nor sets LocalContentColor,
+        // and Text with no explicit colour falls back to BLACK. Without this the
+        // app rendered black type on the dark navy ground - unreadable - while
+        // every assertion about the scheme's own tokens still passed.
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            content()
+        }
+    }
 }

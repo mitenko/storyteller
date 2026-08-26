@@ -1,26 +1,33 @@
 package com.storyteller.ui.settings
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.storyteller.R
 import com.storyteller.domain.model.ReadingMode
 import com.storyteller.domain.model.ThemeChoice
 
@@ -29,11 +36,40 @@ fun SettingsScreen(onBack: () -> Unit, viewModel: SettingsViewModel = hiltViewMo
     val mode by viewModel.mode.collectAsStateWithLifecycle()
     val theme by viewModel.theme.collectAsStateWithLifecycle()
 
-    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text("Settings", style = MaterialTheme.typography.headlineSmall)
+    SettingsFrame(onBack) {
         ReadingModeRow(mode, viewModel::setMode)
         ThemeRow(theme, viewModel::setTheme)
-        Button(onClick = onBack) { Text("Done") }
+    }
+}
+
+/**
+ * The frame: a titled bar with a back action, and the window insets handled by
+ * Scaffold rather than by each screen guessing at padding. Stateless and
+ * separate from SettingsScreen so it can be tested without Hilt.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun SettingsFrame(onBack: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Settings") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_arrow_back),
+                            contentDescription = "Back",
+                        )
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        Column(
+            Modifier.fillMaxSize().padding(padding).padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            content = content,
+        )
     }
 }
 

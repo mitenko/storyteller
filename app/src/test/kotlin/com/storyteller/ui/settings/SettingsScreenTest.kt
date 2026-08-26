@@ -1,9 +1,11 @@
 package com.storyteller.ui.settings
 
-import androidx.compose.ui.test.isToggleable
-import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.storyteller.domain.model.ReadingMode
@@ -47,6 +49,16 @@ class SettingsScreenTest {
 
         assertEquals(listOf(ReadingMode.Tap), changes)
     }
+    @Test fun `the settings screen is framed with a titled bar and a back action`() {
+        var backs = 0
+        compose.setContent { SettingsFrame(onBack = { backs++ }) {} }
+
+        compose.onNodeWithText("Settings").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Back").performClick()
+
+        assertEquals(1, backs)
+    }
+
     @Test fun `each theme option reports itself when chosen`() {
         val chosen = mutableListOf<ThemeChoice>()
         compose.setContent { ThemeRow(ThemeChoice.Dark, onChange = { chosen += it }) }

@@ -1,5 +1,6 @@
 package com.storyteller.ui.theme
 
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
@@ -48,6 +49,31 @@ class StorytellerThemeTest {
     }
 
     /** Both captured in ONE composition: the rule permits setContent only once per test. */
+    /**
+     * The bug this pins: MaterialTheme supplies a colour SCHEME but does not set
+     * LocalContentColor, and Text with no explicit colour falls back to black.
+     * So asserting the scheme's background token is dark proves nothing about
+     * whether text is readable on it - the app rendered black-on-navy while the
+     * background assertion above passed.
+     */
+    @Test fun `dark renders light text, not black`() {
+        var content = Color.Unspecified
+        compose.setContent {
+            StorytellerTheme(ThemeChoice.Dark) { content = LocalContentColor.current }
+        }
+
+        assertTrue("expected light text in dark mode, got $content", content.luminance() > 0.5f)
+    }
+
+    @Test fun `light renders dark text`() {
+        var content = Color.Unspecified
+        compose.setContent {
+            StorytellerTheme(ThemeChoice.Light) { content = LocalContentColor.current }
+        }
+
+        assertTrue("expected dark text in light mode, got $content", content.luminance() < 0.2f)
+    }
+
     @Test fun `dark and light are actually different`() {
         var dark = Color.Unspecified
         var light = Color.Unspecified

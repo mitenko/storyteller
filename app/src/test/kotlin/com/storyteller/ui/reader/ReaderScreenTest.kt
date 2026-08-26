@@ -3,14 +3,14 @@ package com.storyteller.ui.reader
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertHeightIsEqualTo
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertWidthIsEqualTo
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.dp
 import com.storyteller.domain.model.Badge
 import com.storyteller.domain.model.PlaybackState
 import com.storyteller.domain.model.ReadingMode
@@ -44,6 +44,18 @@ class ReaderScreenTest {
         }
 
         compose.onNodeWithTag(BADGE_TAG, useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test fun `the reader is framed with a titled bar`() {
+        compose.setContent {
+            ReaderContent(
+                playing(listOf(line("Bear", "Hello!")), PlaybackState.Playing(0)),
+                onRetry = {},
+                onBack = {},
+            )
+        }
+
+        compose.onNodeWithText("Storyteller").assertIsDisplayed()
     }
 
     @Test fun `the badge is rendered at its full size`() {

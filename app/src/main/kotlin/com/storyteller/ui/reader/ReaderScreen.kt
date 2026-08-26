@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,8 +15,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -60,55 +64,71 @@ fun ReaderContent(
     onBack: () -> Unit,
     onLineTapped: (Int) -> Unit = {},
 ) {
-    Column(
-        Modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        when (state) {
-            ReaderUiState.ReadingPage -> Centered {
-                CircularProgressIndicator(Modifier.semantics { contentDescription = "Reading the page" })
-                Text("Reading the page…")
-            }
+    ReaderFrame { padding ->
+        Column(
+            Modifier.fillMaxSize().padding(padding).padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            when (state) {
+                ReaderUiState.ReadingPage -> Centered {
+                    CircularProgressIndicator(Modifier.semantics { contentDescription = "Reading the page" })
+                    Text("Reading the page…")
+                }
 
-            is ReaderUiState.Playing -> {
-                CurrentSpeakerHeader(state.lines.firstOrNull { it.index == state.playingIndex })
+                is ReaderUiState.Playing -> {
+                    CurrentSpeakerHeader(state.lines.firstOrNull { it.index == state.playingIndex })
 
-                LazyColumn(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    items(state.lines) { line ->
-                        LineRow(
-                            line = line,
-                            isPlaying = line.index == state.playingIndex,
-                            onTap = onLineTapped,
-                        )
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        items(state.lines) { line ->
+                            LineRow(
+                                line = line,
+                                isPlaying = line.index == state.playingIndex,
+                                onTap = onLineTapped,
+                            )
+                        }
                     }
+
+                    // The only place PlaybackState is rendered. Auto reads the page
+                    // straight through, so Finished there really does mean the page is
+                    // done. In Tap mode, onLineTapped() plays a one-unit playlist and
+                    // immediately calls endOfPage(), so Finished fires after every
+                    // tapped line - showing "The End." there would tell the child the
+                    // story ended after a single tap, not after the page did.
+                    if (state.playback == PlaybackState.Finished && state.mode == ReadingMode.Auto) {
+                        Text("The End.", style = MaterialTheme.typography.titleMedium)
+                    }
+
+                    // ...and one way out, offered from the moment lines appear rather
+                    // than only once Finished, because a child may want to move on to
+                    // the next page early. Before this, the successful path had no
+                    // control at all - "Take another photo" existed only under Error.
+                    Button(onClick = onBack) { Text("Take another photo") }
                 }
 
-                // The only place PlaybackState is rendered. Auto reads the page
-                // straight through, so Finished there really does mean the page is
-                // done. In Tap mode, onLineTapped() plays a one-unit playlist and
-                // immediately calls endOfPage(), so Finished fires after every
-                // tapped line - showing "The End." there would tell the child the
-                // story ended after a single tap, not after the page did.
-                if (state.playback == PlaybackState.Finished && state.mode == ReadingMode.Auto) {
-                    Text("The End.", style = MaterialTheme.typography.titleMedium)
+                is ReaderUiState.Error -> Centered {
+                    Text(state.message, style = MaterialTheme.typography.bodyLarge)
+                    if (state.canRetry) Button(onClick = onRetry) { Text("Try again") }
+                    Button(onClick = onBack) { Text("Take another photo") }
                 }
-
-                // ...and one way out, offered from the moment lines appear rather
-                // than only once Finished, because a child may want to move on to
-                // the next page early. Before this, the successful path had no
-                // control at all - "Take another photo" existed only under Error.
-                Button(onClick = onBack) { Text("Take another photo") }
-            }
-
-            is ReaderUiState.Error -> Centered {
-                Text(state.message, style = MaterialTheme.typography.bodyLarge)
-                if (state.canRetry) Button(onClick = onRetry) { Text("Try again") }
-                Button(onClick = onBack) { Text("Take another photo") }
             }
         }
+    }
+}
+
+/**
+ * The frame. No back arrow in the bar: the reader already offers "Take another
+ * photo", which says what going back actually does here, and two competing
+ * affordances for one action is worse than one clear one. Scaffold owns the
+ * window insets so the content does not have to guess at them.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ReaderFrame(content: @Composable (PaddingValues) -> Unit) {
+    Scaffold(topBar = { TopAppBar(title = { Text("Storyteller") }) }) { padding ->
+        content(padding)
     }
 }
 
