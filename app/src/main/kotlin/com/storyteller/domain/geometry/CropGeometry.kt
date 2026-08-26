@@ -6,13 +6,14 @@ import kotlin.math.roundToInt
 data class PixelRect(val left: Int, val top: Int, val width: Int, val height: Int)
 
 /**
- * Converts a normalized character box into a padded, clamped pixel rect.
+ * Converts a normalized bounding box into a padded, clamped pixel rect.
  *
  * Padding is a fraction of the box's LARGER edge, applied equally on all four
- * sides, because a box drawn tight to a character reads as a claustrophobic crop
- * at badge size. Returns null when the box is implausible — zero or negative
- * area, or an edge under [minEdgeFraction] of the image — since a sliver crop is
- * worse than no badge, and the caller falls back to the emoji.
+ * sides, because a box drawn tight to a speech bubble reads as a claustrophobic
+ * crop once it fills the screen. Returns null when the box is implausible —
+ * zero or negative area, or an edge under [minEdgeFraction] of the image —
+ * since a sliver crop is worse than no bubble, and the caller falls back to
+ * the unit's text.
  */
 fun cropRect(
     bounds: BoundingBox,

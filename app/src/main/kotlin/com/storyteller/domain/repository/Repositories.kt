@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
 
-/** Reads the page, attributes speakers and identifies characters in one vision call. */
+/** Reads the page and attributes each line to a speaker in one vision call. */
 interface PageReader {
     suspend fun read(image: PageImage): Result<ParsedPage>
 }
