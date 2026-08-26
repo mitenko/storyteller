@@ -405,37 +405,12 @@ class ReaderViewModelTest {
         assertEquals("popping the reader entry must stop playback", 1, player.stops)
     }
 
-    /**
-     * F3: belt-and-suspenders for the narrator-badge bug at the ReaderViewModel
-     * side. Even if a badges map somehow carried an entry keyed to a
-     * lower-cased "narrator" (e.g. BadgeRepositoryImpl's own filter missed it),
-     * this comparison must independently recognise the speaker as the narrator
-     * and render Badge.None - it must not rely solely on the map never
-     * containing that key.
-     */
-    @Test fun `a lowercase narrator speaker renders no badge even if the badges map carries an entry for it`() =
-        runTest(dispatcher) {
-            val pipeline = FakePipeline()
-            val player = FakePlayer()
-            val vm = ReaderViewModel(pipeline, player, FakeSettingsRepository())
-
-            val unit = SpeechUnit(0, "narrator", "Once upon a time,", null)
-            pipeline.states.value = PipelineState.Ready(
-                listOf(PreparedUnit(unit, "v", File("/tmp/0.mp3"))),
-                mapOf("narrator" to com.storyteller.domain.model.Badge.Emoji("🧑")),
-            )
-            runCurrent()
-
-            val line = (vm.uiState.value as ReaderUiState.Playing).lines.single()
-            assertEquals(com.storyteller.domain.model.Badge.None, line.badge)
-        }
-
     // --- Mode-aware behaviour (Task 8) ---------------------------------------
 
     @Test fun `tap mode does not start playback on its own`() = runTest {
         val player = RecordingPlayer()
         readerViewModel(player, mode = ReadingMode.Tap)
-        pipeline.emit(PipelineState.Ready(preparedUnits(2), emptyMap()))
+        pipeline.emit(PipelineState.Ready(preparedUnits(2)))
         advanceUntilIdle()
 
         assertTrue("tap mode must not autoplay", player.played.isEmpty())
@@ -444,7 +419,7 @@ class ReaderViewModelTest {
     @Test fun `auto mode still plays as it always did`() = runTest {
         val player = RecordingPlayer()
         readerViewModel(player, mode = ReadingMode.Auto)
-        pipeline.emit(PipelineState.Ready(preparedUnits(2), emptyMap()))
+        pipeline.emit(PipelineState.Ready(preparedUnits(2)))
         advanceUntilIdle()
 
         assertEquals(1, player.played.size)
@@ -453,7 +428,7 @@ class ReaderViewModelTest {
     @Test fun `auto mode follows the player's playlist index`() = runTest {
         val player = RecordingPlayer()
         val vm = readerViewModel(player, mode = ReadingMode.Auto)
-        pipeline.emit(PipelineState.Ready(preparedUnits(3), emptyMap()))
+        pipeline.emit(PipelineState.Ready(preparedUnits(3)))
         advanceUntilIdle()
 
         // Auto builds one playlist per page in reading order from unit 0, so the
@@ -467,7 +442,7 @@ class ReaderViewModelTest {
     @Test fun `tap mode ignores the player's playlist index`() = runTest {
         val player = RecordingPlayer()
         val vm = readerViewModel(player, mode = ReadingMode.Tap)
-        pipeline.emit(PipelineState.Ready(preparedUnits(3), emptyMap()))
+        pipeline.emit(PipelineState.Ready(preparedUnits(3)))
         advanceUntilIdle()
 
         vm.onLineTapped(2)
@@ -484,7 +459,7 @@ class ReaderViewModelTest {
     @Test fun `tapping a line plays exactly that unit`() = runTest {
         val player = RecordingPlayer()
         val vm = readerViewModel(player, mode = ReadingMode.Tap)
-        pipeline.emit(PipelineState.Ready(preparedUnits(3), emptyMap()))
+        pipeline.emit(PipelineState.Ready(preparedUnits(3)))
         advanceUntilIdle()
 
         vm.onLineTapped(1)
@@ -498,7 +473,7 @@ class ReaderViewModelTest {
     @Test fun `tapping a line whose audio is not ready is inert`() = runTest {
         val player = RecordingPlayer()
         val vm = readerViewModel(player, mode = ReadingMode.Tap)
-        pipeline.emit(PipelineState.Preparing(speechUnits(3), preparedUnits(1), emptyMap()))
+        pipeline.emit(PipelineState.Preparing(speechUnits(3), preparedUnits(1)))
         advanceUntilIdle()
 
         vm.onLineTapped(2)
@@ -514,7 +489,7 @@ class ReaderViewModelTest {
 
     @Test fun `preparing shows every line with only ready ones enabled`() = runTest {
         val vm = readerViewModel(RecordingPlayer(), mode = ReadingMode.Tap)
-        pipeline.emit(PipelineState.Preparing(speechUnits(3), preparedUnits(1), emptyMap()))
+        pipeline.emit(PipelineState.Preparing(speechUnits(3), preparedUnits(1)))
         advanceUntilIdle()
 
         val lines = (vm.uiState.value as ReaderUiState.Playing).lines
@@ -526,7 +501,7 @@ class ReaderViewModelTest {
     /** F7: a row not yet synthesized must grey in Auto too, not just Tap. */
     @Test fun `an auto-mode row whose audio is not ready renders greyed`() = runTest {
         val vm = readerViewModel(RecordingPlayer(), mode = ReadingMode.Auto)
-        pipeline.emit(PipelineState.Preparing(speechUnits(3), preparedUnits(1), emptyMap()))
+        pipeline.emit(PipelineState.Preparing(speechUnits(3), preparedUnits(1)))
         advanceUntilIdle()
 
         val lines = (vm.uiState.value as ReaderUiState.Playing).lines
@@ -536,7 +511,7 @@ class ReaderViewModelTest {
     /** F7: Auto never acts on a tap (onLineTapped ignores it), so no Auto row may be tappable. */
     @Test fun `an auto-mode row is never tappable, ready or not`() = runTest {
         val vm = readerViewModel(RecordingPlayer(), mode = ReadingMode.Auto)
-        pipeline.emit(PipelineState.Ready(preparedUnits(2), emptyMap()))
+        pipeline.emit(PipelineState.Ready(preparedUnits(2)))
         advanceUntilIdle()
 
         val lines = (vm.uiState.value as ReaderUiState.Playing).lines
@@ -581,7 +556,7 @@ class ReaderViewModelTest {
         }
 
     @Test fun `mode resolves before an already-ready pipeline state is handled`() = runTest {
-        pipeline.emit(PipelineState.Ready(preparedUnits(2), emptyMap()))
+        pipeline.emit(PipelineState.Ready(preparedUnits(2)))
         val player = RecordingPlayer()
         ReaderViewModel(pipeline, player, FakeSettingsRepository(ReadingMode.Tap))
         advanceUntilIdle()

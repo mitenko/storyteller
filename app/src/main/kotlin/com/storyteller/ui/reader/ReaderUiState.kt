@@ -1,6 +1,5 @@
 package com.storyteller.ui.reader
 
-import com.storyteller.domain.model.Badge
 import com.storyteller.domain.model.PlaybackState
 import com.storyteller.domain.model.ReadingMode
 
@@ -27,7 +26,6 @@ sealed interface ReaderUiState {
         val index: Int,
         val speaker: String,
         val text: String,
-        val badge: Badge,
         /**
          * False until this line's audio has been synthesized - drives the row's
          * greyed-out rendering in BOTH modes. Before F7 this was conflated with

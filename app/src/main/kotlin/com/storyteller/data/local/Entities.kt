@@ -10,17 +10,6 @@ const val PARSE_VERSION = 2
 data class CharacterVoiceEntity(
     @PrimaryKey val character: String,
     val voiceId: String,
-    /**
-     * Write-only: nothing in app/src/main reads this column (see
-     * VoiceDao.setBadgePath). Disk is the authoritative source for badge
-     * resolution - BadgeRepositoryImpl decides by a deterministic file path
-     * under filesDir, not by this row. It is populated only on a LATER page a
-     * character appears on, never the first: BadgeRepositoryImpl.badgesFor
-     * runs before VoiceRepository.voiceFor ever assigns that character a
-     * voice (see ReadingPipelineImpl.run), so on a first sighting this row
-     * does not exist yet and setBadgePath's UPDATE is a no-op.
-     */
-    val badgePath: String? = null,
 )
 
 /** Keyed on a hash of the uploaded JPEG bytes, so only byte-identical input hits. */

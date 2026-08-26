@@ -6,11 +6,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
@@ -27,7 +25,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -35,7 +32,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.storyteller.R
-import com.storyteller.domain.model.Badge
 import com.storyteller.domain.model.PlaybackState
 import com.storyteller.domain.model.ReadingMode
 
@@ -79,8 +75,6 @@ fun ReaderContent(
                 }
 
                 is ReaderUiState.Playing -> {
-                    CurrentSpeakerHeader(state.lines.firstOrNull { it.index == state.playingIndex })
-
                     LazyColumn(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -135,32 +129,6 @@ private fun ReaderFrame(content: @Composable (PaddingValues) -> Unit) {
     }
 }
 
-internal const val HEADER_TAG = "current-speaker"
-
-/**
- * Who is speaking right now, above the list. [line] is null when nothing is
- * sounding, and then nothing renders.
- *
- * The narrator keeps the header and merely loses the badge, rather than hiding it
- * altogether: narration is a real answer to "who is talking now", and hiding the
- * header would make it flicker in and out on every alternation between narration
- * and dialogue - which on a graphic-novel page can be every other line.
- */
-@Composable
-internal fun CurrentSpeakerHeader(line: ReaderUiState.Line?) {
-    if (line == null) return
-    Row(
-        Modifier.fillMaxWidth().testTag(HEADER_TAG),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (line.badge != Badge.None) {
-            BadgeIcon(line.badge)
-            Spacer(Modifier.width(12.dp))
-        }
-        Text(line.speaker, style = MaterialTheme.typography.titleMedium)
-    }
-}
-
 @Composable
 private fun Centered(content: @Composable () -> Unit) {
     Column(
@@ -171,10 +139,6 @@ private fun Centered(content: @Composable () -> Unit) {
 }
 
 /**
- * The speaker name is the badge's accessible label: the badge itself is
- * decorative (contentDescription null) because the name is already right there
- * as text, and announcing it twice is noise.
- *
  * Greying (via [ReaderUiState.Line.audioReady]) and tappability (via
  * [ReaderUiState.Line.tappable]) are deliberately separate: a row whose audio
  * is not ready greys in BOTH modes, but only a Tap-mode row is ever clickable.
@@ -194,12 +158,6 @@ internal fun LineRow(line: ReaderUiState.Line, isPlaying: Boolean, onTap: (Int) 
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Omitted entirely for the narrator, spacer included, so narration runs
-        // to the margin while dialogue sits indented under its speaker.
-        if (line.badge != Badge.None) {
-            BadgeIcon(line.badge)
-            Spacer(Modifier.width(12.dp))
-        }
         Column(Modifier.alpha(if (line.audioReady) 1f else 0.4f)) {
             Text(line.speaker, style = MaterialTheme.typography.labelMedium)
             Text(line.text, style = MaterialTheme.typography.bodyLarge)

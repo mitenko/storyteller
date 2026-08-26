@@ -3,14 +3,12 @@ package com.storyteller.ui.reader
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.storyteller.domain.ReadingPipeline
-import com.storyteller.domain.model.Badge
 import com.storyteller.domain.model.FailureReason
 import com.storyteller.domain.model.PipelineState
 import com.storyteller.domain.model.PlaybackState
 import com.storyteller.domain.model.PreparedUnit
 import com.storyteller.domain.model.ReadingMode
 import com.storyteller.domain.model.SpeechUnit
-import com.storyteller.domain.model.isNarrator
 import com.storyteller.domain.repository.PagePlayer
 import com.storyteller.domain.repository.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -126,7 +124,7 @@ class ReaderViewModel @Inject constructor(
             is PipelineState.Preparing -> {
                 if (mode == ReadingMode.Auto) queue(state.ready)
                 lastReady = state.ready
-                _uiState.value = playingState(state.units, state.ready, state.badges)
+                _uiState.value = playingState(state.units, state.ready)
             }
 
             is PipelineState.Ready -> {
@@ -145,7 +143,7 @@ class ReaderViewModel @Inject constructor(
                     player.endOfPage()
                 }
                 lastReady = state.units
-                _uiState.value = playingState(state.units.map { it.unit }, state.units, state.badges)
+                _uiState.value = playingState(state.units.map { it.unit }, state.units)
             }
 
             is PipelineState.Failed -> {
@@ -196,7 +194,6 @@ class ReaderViewModel @Inject constructor(
     private fun playingState(
         all: List<SpeechUnit>,
         ready: List<PreparedUnit>,
-        badges: Map<String, Badge>,
     ): ReaderUiState.Playing {
         val readyIndices = ready.mapTo(mutableSetOf()) { it.unit.index }
         return ReaderUiState.Playing(
@@ -206,14 +203,6 @@ class ReaderViewModel @Inject constructor(
                     index = u.index,
                     speaker = u.speaker,
                     text = u.text,
-                    // badges omits the narrator entirely rather than mapping it to
-                    // None, so a narrator speaker must short-circuit before the
-                    // lookup - badges.getValue(speaker) would throw for every
-                    // narrator line. isNarrator() trims and case-folds (same rule
-                    // as BadgeRepositoryImpl's own filter) because SpeechUnit.speaker
-                    // is sourced independently of ParsedCharacter.name and may not
-                    // share its exact casing.
-                    badge = if (isNarrator(u.speaker)) Badge.None else badges[u.speaker] ?: Badge.None,
                     // Greying tracks readiness alone, in both modes - Auto used to
                     // report every row ready regardless of synthesis progress,
                     // which lost Auto's only progress indication (F7). Tappability

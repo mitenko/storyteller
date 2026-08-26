@@ -17,7 +17,7 @@ class ReadingPipelineRetryTest {
         val reader = FakePageReader(Result.success(units))
         // line 2 fails the first time round
         val audio = FakeAudioRepository(failFor = setOf("line 2"))
-        val p = ReadingPipelineImpl(reader, FakeVoiceRepository(), audio, FakeBadgeRepository(), this)
+        val p = ReadingPipelineImpl(reader, FakeVoiceRepository(), audio, this)
 
         p.state.test {
             skipItems(1)
@@ -38,7 +38,7 @@ class ReadingPipelineRetryTest {
     @Test
     fun `IOException from the reader maps to Network and stays retryable`() = runTest {
         val reader = FakePageReader(Result.failure(java.io.IOException("offline")))
-        val p = ReadingPipelineImpl(reader, FakeVoiceRepository(), FakeAudioRepository(), FakeBadgeRepository(), this)
+        val p = ReadingPipelineImpl(reader, FakeVoiceRepository(), FakeAudioRepository(), this)
 
         p.state.test {
             skipItems(1)
@@ -56,7 +56,7 @@ class ReadingPipelineRetryTest {
         val reader = FakePageReader(
             Result.failure(kotlinx.serialization.SerializationException("bad shape")),
         )
-        val p = ReadingPipelineImpl(reader, FakeVoiceRepository(), FakeAudioRepository(), FakeBadgeRepository(), this)
+        val p = ReadingPipelineImpl(reader, FakeVoiceRepository(), FakeAudioRepository(), this)
 
         p.state.test {
             skipItems(1)
@@ -71,7 +71,7 @@ class ReadingPipelineRetryTest {
     fun `voice lookup failure maps to Synthesis`() = runTest {
         val reader = FakePageReader(Result.success(listOf(speechUnit(0, speaker = "Wolf"))))
         val voices = FakeVoiceRepository(fail = setOf("Wolf"))
-        val p = ReadingPipelineImpl(reader, voices, FakeAudioRepository(), FakeBadgeRepository(), this)
+        val p = ReadingPipelineImpl(reader, voices, FakeAudioRepository(), this)
 
         p.state.test {
             skipItems(1)
@@ -85,7 +85,7 @@ class ReadingPipelineRetryTest {
     @Test
     fun `retry with no prior start is a no-op`() = runTest {
         val reader = FakePageReader(Result.success(listOf(speechUnit(0))))
-        val p = ReadingPipelineImpl(reader, FakeVoiceRepository(), FakeAudioRepository(), FakeBadgeRepository(), this)
+        val p = ReadingPipelineImpl(reader, FakeVoiceRepository(), FakeAudioRepository(), this)
         p.retry()
         assertEquals(PipelineState.Idle, p.state.value)
         assertEquals(0, reader.calls)

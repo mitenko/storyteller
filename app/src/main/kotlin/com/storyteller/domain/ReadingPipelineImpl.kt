@@ -1,13 +1,11 @@
 package com.storyteller.domain
 
-import com.storyteller.domain.model.Badge
 import com.storyteller.domain.model.FailureReason
 import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.PipelineState
 import com.storyteller.domain.model.PreparedUnit
 import com.storyteller.domain.model.SpeechUnit
 import com.storyteller.domain.repository.AudioRepository
-import com.storyteller.domain.repository.BadgeRepository
 import com.storyteller.domain.repository.PageReader
 import com.storyteller.domain.repository.VoiceRepository
 import kotlinx.coroutines.CancellationException
@@ -30,7 +28,6 @@ class ReadingPipelineImpl(
     private val pageReader: PageReader,
     private val voices: VoiceRepository,
     private val audio: AudioRepository,
-    private val badges: BadgeRepository,
     private val scope: CoroutineScope,
 ) : ReadingPipeline {
 
@@ -51,9 +48,6 @@ class ReadingPipelineImpl(
      * never costs a second vision call.
      */
     private var parsed: List<SpeechUnit>? = null
-
-    /** The badges resolved for [parsed]. Reset alongside it; see [parsed]. */
-    private var pageBadges: Map<String, Badge> = emptyMap()
 
     /**
      * Bumped by every [start], [retry] and [reset]. A run captures the epoch it
@@ -83,7 +77,7 @@ class ReadingPipelineImpl(
             job = scope.launch {
                 guarded(myEpoch) {
                     if (cached != null) {
-                        setState(myEpoch, PipelineState.Preparing(cached, emptyList(), pageBadges))
+                        setState(myEpoch, PipelineState.Preparing(cached, emptyList()))
                         prepareAll(cached, myEpoch)
                     } else {
                         run(image, myEpoch)
@@ -99,7 +93,6 @@ class ReadingPipelineImpl(
             job = null
             lastImage = null
             parsed = null
-            pageBadges = emptyMap()
             epoch++
             _state.value = PipelineState.Idle
         }
@@ -150,27 +143,12 @@ class ReadingPipelineImpl(
             return
         }
 
-        // Badges are cosmetic: a failure here must never cost the page.
-        // BadgeRepositoryImpl already degrades internally; this is the outer belt.
-        val resolved = try {
-            badges.badgesFor(image, page.characters)
-        } catch (e: CancellationException) {
-            // See `guarded`/`prepare`: still-active means a spurious cancellation
-            // from the repository (BadgeRepositoryImpl rethrows it from both
-            // `resolve` and `usingStored`), which must degrade to no badges
-            // rather than fail the page.
-            if (currentCoroutineContext().isActive) emptyMap() else throw e
-        } catch (e: Throwable) {
-            emptyMap()
-        }
-
         synchronized(lock) {
             if (epoch == myEpoch) {
                 parsed = units
-                pageBadges = resolved
             }
         }
-        setState(myEpoch, PipelineState.Preparing(units, emptyList(), resolved))
+        setState(myEpoch, PipelineState.Preparing(units, emptyList()))
         prepareAll(units, myEpoch)
     }
 
@@ -191,9 +169,9 @@ class ReadingPipelineImpl(
                 return@coroutineScope
             }
             ready += prepared
-            setState(myEpoch, PipelineState.Preparing(units, ready.toList(), pageBadges))
+            setState(myEpoch, PipelineState.Preparing(units, ready.toList()))
         }
-        setState(myEpoch, PipelineState.Ready(ready.toList(), pageBadges))
+        setState(myEpoch, PipelineState.Ready(ready.toList()))
     }
 
     /**

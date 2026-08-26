@@ -3,7 +3,6 @@ package com.storyteller.di
 import com.storyteller.domain.ReadingPipeline
 import com.storyteller.domain.ReadingPipelineImpl
 import com.storyteller.domain.repository.AudioRepository
-import com.storyteller.domain.repository.BadgeRepository
 import com.storyteller.domain.repository.PageReader
 import com.storyteller.domain.repository.VoiceRepository
 import dagger.Module
@@ -37,7 +36,6 @@ object PipelineModule {
         pageReader: PageReader,
         voices: VoiceRepository,
         audio: AudioRepository,
-        badges: BadgeRepository,
         scope: CoroutineScope,
-    ): ReadingPipeline = ReadingPipelineImpl(pageReader, voices, audio, badges, scope)
+    ): ReadingPipeline = ReadingPipelineImpl(pageReader, voices, audio, scope)
 }

@@ -3,16 +3,11 @@ package com.storyteller.ui.reader
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.test.assertHeightIsEqualTo
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertWidthIsEqualTo
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.unit.dp
-import com.storyteller.domain.model.Badge
 import com.storyteller.domain.model.PlaybackState
 import com.storyteller.domain.model.ReadingMode
 import org.junit.Assert.assertEquals
@@ -29,23 +24,15 @@ class ReaderScreenTest {
     @get:Rule val compose = createComposeRule()
 
     /**
-     * These fixtures only fill the fields Task 8 added (badge, enabled, mode,
-     * playingIndex) with neutral defaults — this file's own rendering of badges,
-     * tap handling and highlighting is Task 9's job, not this task's.
+     * These fixtures only fill the fields Task 8 added (enabled, mode,
+     * playingIndex) with neutral defaults — this file's own tap handling and
+     * highlighting is Task 9's job, not this task's.
      */
-    private fun line(speaker: String, text: String, index: Int = 0, badge: Badge = Badge.None) =
-        ReaderUiState.Line(index, speaker, text, badge, audioReady = true, tappable = true)
+    private fun line(speaker: String, text: String, index: Int = 0) =
+        ReaderUiState.Line(index, speaker, text, audioReady = true, tappable = true)
 
     private fun playing(lines: List<ReaderUiState.Line>, playback: PlaybackState) =
         ReaderUiState.Playing(lines, playback, ReadingMode.Auto, playingIndex = null)
-
-    @Test fun `a narrated line has no badge column at all`() {
-        compose.setContent {
-            LineRow(line("Narrator", "Once upon a time,"), isPlaying = false, onTap = {})
-        }
-
-        compose.onNodeWithTag(BADGE_TAG, useUnmergedTree = true).assertDoesNotExist()
-    }
 
     @Test fun `the reader is framed with a titled bar`() {
         compose.setContent {
@@ -57,45 +44,6 @@ class ReaderScreenTest {
         }
 
         compose.onNodeWithText("Storyteller").assertIsDisplayed()
-    }
-
-    @Test fun `the badge is rendered at its full size`() {
-        compose.setContent { BadgeIcon(Badge.Emoji("B")) }
-
-        compose.onNodeWithTag(BADGE_TAG, useUnmergedTree = true)
-            .assertWidthIsEqualTo(60.dp)
-            .assertHeightIsEqualTo(60.dp)
-    }
-
-    @Test fun `a character line keeps its badge column`() {
-        compose.setContent {
-            LineRow(line("Bear", "Hello!", badge = Badge.Emoji("B")), isPlaying = false, onTap = {})
-        }
-
-        compose.onNodeWithTag(BADGE_TAG, useUnmergedTree = true).assertExists()
-    }
-
-    @Test fun `the header names whoever is speaking now`() {
-        compose.setContent { CurrentSpeakerHeader(line("Bear", "Hello!", badge = Badge.Emoji("B"))) }
-
-        compose.onNodeWithText("Bear").assertIsDisplayed()
-        compose.onNodeWithTag(BADGE_TAG, useUnmergedTree = true).assertExists()
-    }
-
-    @Test fun `the header still names the narrator, with no badge`() {
-        compose.setContent { CurrentSpeakerHeader(line("Narrator", "Once upon a time,")) }
-
-        // Steadier than hiding the header: narration is a real answer to "who is
-        // talking now", and hiding it would make the header flicker in and out on
-        // every alternation between narration and dialogue.
-        compose.onNodeWithText("Narrator").assertIsDisplayed()
-        compose.onNodeWithTag(BADGE_TAG, useUnmergedTree = true).assertDoesNotExist()
-    }
-
-    @Test fun `there is no header when nothing is sounding`() {
-        compose.setContent { CurrentSpeakerHeader(null) }
-
-        compose.onNodeWithTag(HEADER_TAG, useUnmergedTree = true).assertDoesNotExist()
     }
 
     @Test fun `lists speakers and lines in order`() {
@@ -239,8 +187,7 @@ class ReaderScreenTest {
         index: Int = 0,
         audioReady: Boolean = true,
         tappable: Boolean = true,
-        badge: Badge = Badge.None,
-    ) = ReaderUiState.Line(index, "Bear", "Hello there", badge, audioReady, tappable)
+    ) = ReaderUiState.Line(index, "Bear", "Hello there", audioReady, tappable)
 
     @Test fun `a tappable row reports the index it was given`() {
         var tapped: Int? = null
@@ -281,10 +228,5 @@ class ReaderScreenTest {
         compose.onNodeWithText("Hello there").performClick()
 
         assertEquals(null, tapped)
-    }
-
-    @Test fun `an emoji badge renders`() {
-        compose.setContent { BadgeIcon(Badge.Emoji("🐻")) }
-        compose.onNodeWithText("🐻").assertIsDisplayed()
     }
 }

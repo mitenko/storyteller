@@ -1,15 +1,12 @@
 package com.storyteller.domain
 
 import app.cash.turbine.test
-import com.storyteller.domain.model.Badge
 import com.storyteller.domain.model.PipelineState
 import com.storyteller.domain.model.FailureReason
 import com.storyteller.domain.model.PageImage
-import com.storyteller.domain.model.ParsedCharacter
 import com.storyteller.domain.model.ParsedPage
 import com.storyteller.domain.model.SpeechUnit
 import com.storyteller.domain.repository.AudioRepository
-import com.storyteller.domain.repository.BadgeRepository
 import com.storyteller.domain.repository.PageReader
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -27,7 +24,6 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -43,25 +39,15 @@ class ReadingPipelineImplTest {
         audio: FakeAudioRepository,
         voices: FakeVoiceRepository = FakeVoiceRepository(),
         scope: TestScope,
-    ) = ReadingPipelineImpl(reader, voices, audio, FakeBadgeRepository(), scope)
+    ) = ReadingPipelineImpl(reader, voices, audio, scope)
 
     /**
      * Builds a pipeline over [units] speech units with default fakes, recording
-     * every emitted state into [states] for the duration of the test. [badgeRepo],
-     * when supplied, lets a test inspect the calls its fake actually received
-     * (e.g. to assert `page.characters` was forwarded); otherwise one is built
-     * from [badges]/[badgesThrow]/[badgesThrowCancellation].
+     * every emitted state into [states] for the duration of the test.
      */
-    private fun TestScope.pipelineWith(
-        units: Int,
-        badges: Map<String, Badge> = emptyMap(),
-        badgesThrow: Boolean = false,
-        badgesThrowCancellation: Boolean = false,
-        characters: List<ParsedCharacter> = emptyList(),
-        badgeRepo: FakeBadgeRepository = FakeBadgeRepository(badges, badgesThrow, badgesThrowCancellation),
-    ): ReadingPipelineImpl {
-        val reader = FakePageReader(Result.success((0 until units).map { speechUnit(it) }), characters)
-        val p = ReadingPipelineImpl(reader, FakeVoiceRepository(), FakeAudioRepository(), badgeRepo, this)
+    private fun TestScope.pipelineWith(units: Int): ReadingPipelineImpl {
+        val reader = FakePageReader(Result.success((0 until units).map { speechUnit(it) }))
+        val p = ReadingPipelineImpl(reader, FakeVoiceRepository(), FakeAudioRepository(), this)
         // Unconfined: a StandardTestDispatcher collector can miss the terminal
         // emission (a queued resume that never gets its turn before the test
         // body inspects `states`); Unconfined resumes inline on every emission,
@@ -164,62 +150,10 @@ class ReadingPipelineImplTest {
         seen.forEach { assertEquals(3, it.units.size) }
     }
 
-    @Test fun `preparing carries the badges resolved for the page`() = runTest {
-        val pipeline = pipelineWith(units = 3, badges = mapOf("Bear" to Badge.Emoji("🐻")))
-        pipeline.start(pageImage())
-        advanceUntilIdle()
-
-        val seen = states.filterIsInstance<PipelineState.Preparing>()
-        assertTrue("expected at least one Preparing", seen.isNotEmpty())
-        seen.forEach { assertEquals(Badge.Emoji("🐻"), it.badges["Bear"]) }
-    }
-
-    @Test fun `ready carries the badges resolved for the page`() = runTest {
-        val pipeline = pipelineWith(units = 1, badges = mapOf("Bear" to Badge.Emoji("🐻")))
-        pipeline.start(pageImage())
-        advanceUntilIdle()
-
-        val ready = states.filterIsInstance<PipelineState.Ready>().last()
-        assertEquals(Badge.Emoji("🐻"), ready.badges.getValue("Bear"))
-    }
-
-    @Test fun `resolves badges using this page's own image and characters`() = runTest {
-        val characters = listOf(ParsedCharacter("Bear", "🐻", null))
-        val badgeRepo = FakeBadgeRepository()
-        val pipeline = pipelineWith(units = 1, characters = characters, badgeRepo = badgeRepo)
-        val image = pageImage()
-        pipeline.start(image)
-        advanceUntilIdle()
-
-        val (seenImage, seenCharacters) = badgeRepo.calls.single()
-        assertSame("must forward this page's own image, not a placeholder", image, seenImage)
-        assertEquals(characters, seenCharacters)
-    }
-
-    @Test fun `a badge failure does not fail the page`() = runTest {
-        val pipeline = pipelineWith(units = 1, badgesThrow = true)
-        pipeline.start(pageImage())
-        advanceUntilIdle()
-
-        val ready = states.last()
-        assertTrue(ready is PipelineState.Ready)
-        assertEquals(emptyMap<String, Badge>(), (ready as PipelineState.Ready).badges)
-    }
-
-    @Test fun `a spurious CancellationException from badge resolution does not fail the page`() = runTest {
-        val pipeline = pipelineWith(units = 1, badgesThrowCancellation = true)
-        pipeline.start(pageImage())
-        advanceUntilIdle()
-
-        val ready = states.last()
-        assertTrue("expected Ready, was $ready", ready is PipelineState.Ready)
-        assertEquals(emptyMap<String, Badge>(), (ready as PipelineState.Ready).badges)
-    }
-
     @Test
     fun `a synthesis repository that throws still reaches a terminal Failed`() = runTest {
         val reader = FakePageReader(Result.success((0..2).map { speechUnit(it) }))
-        val p = ReadingPipelineImpl(reader, FakeVoiceRepository(), ThrowingAudioRepository(), FakeBadgeRepository(), this)
+        val p = ReadingPipelineImpl(reader, FakeVoiceRepository(), ThrowingAudioRepository(), this)
 
         p.state.test {
             skipItems(1)
@@ -234,7 +168,7 @@ class ReadingPipelineImplTest {
 
     @Test
     fun `a page reader that throws still reaches a terminal Failed`() = runTest {
-        val p = ReadingPipelineImpl(ThrowingPageReader(), FakeVoiceRepository(), FakeAudioRepository(), FakeBadgeRepository(), this)
+        val p = ReadingPipelineImpl(ThrowingPageReader(), FakeVoiceRepository(), FakeAudioRepository(), this)
 
         p.state.test {
             skipItems(1)
@@ -250,7 +184,7 @@ class ReadingPipelineImplTest {
     @Test
     fun `a spurious CancellationException from a repository still reaches Failed`() = runTest {
         val reader = FakePageReader(Result.success((0..2).map { speechUnit(it) }))
-        val p = ReadingPipelineImpl(reader, FakeVoiceRepository(), CancellingAudioRepository(), FakeBadgeRepository(), this)
+        val p = ReadingPipelineImpl(reader, FakeVoiceRepository(), CancellingAudioRepository(), this)
 
         p.state.test {
             skipItems(1)
@@ -265,7 +199,7 @@ class ReadingPipelineImplTest {
 
     @Test
     fun `a spurious CancellationException from the reader still reaches Failed`() = runTest {
-        val p = ReadingPipelineImpl(CancellingPageReader(), FakeVoiceRepository(), FakeAudioRepository(), FakeBadgeRepository(), this)
+        val p = ReadingPipelineImpl(CancellingPageReader(), FakeVoiceRepository(), FakeAudioRepository(), this)
 
         p.state.test {
             skipItems(1)
@@ -285,7 +219,6 @@ class ReadingPipelineImplTest {
             SlowPageReader((0..2).map { speechUnit(it) }),
             FakeVoiceRepository(),
             FakeAudioRepository(),
-            FakeBadgeRepository(),
             this,
         )
 
@@ -385,7 +318,6 @@ class ReadingPipelineImplTest {
                     FakePageReader(Result.success(units)),
                     FakeVoiceRepository(),
                     FakeAudioRepository(delays = units.associate { it.text to 30L }),
-                    FakeBadgeRepository(),
                     scope,
                 )
                 p.start(pageImage())
