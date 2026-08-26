@@ -194,19 +194,49 @@ class ReaderScreenTest {
         audioReady: Boolean = true,
     ) = ReaderUiState.Line(index, "Bear", "Hello there", bounds = null, audioReady = audioReady)
 
-    @Test fun `a ready row reports the index it was given`() {
+    @Test fun `a ready row in tap mode reports the index it was given`() {
         var tapped: Int? = null
-        compose.setContent { LineRow(lineRowFixture(index = 2), isPlaying = false, onTap = { tapped = it }) }
+        compose.setContent {
+            LineRow(lineRowFixture(index = 2), mode = ReadingMode.Tap, isPlaying = false, onTap = { tapped = it })
+        }
 
         compose.onNodeWithText("Hello there").performClick()
 
         assertEquals(2, tapped)
     }
 
-    @Test fun `a row whose audio is not ready is inert`() {
+    @Test fun `a row whose audio is not ready is inert even in tap mode`() {
         var tapped: Int? = null
         compose.setContent {
-            LineRow(lineRowFixture(audioReady = false), isPlaying = false, onTap = { tapped = it })
+            LineRow(
+                lineRowFixture(audioReady = false),
+                mode = ReadingMode.Tap,
+                isPlaying = false,
+                onTap = { tapped = it },
+            )
+        }
+
+        compose.onNodeWithText("Hello there").performClick()
+
+        assertEquals(null, tapped)
+    }
+
+    /**
+     * I1 regression: a first pass at dropping `tappable` gated this row on
+     * `audioReady` alone, which put every ready Auto row back in the click and
+     * accessibility tree - rippling on touch and reachable by TalkBack even
+     * though onLineTapped silently discards Auto taps. Pins that a ready Auto
+     * row stays inert.
+     */
+    @Test fun `a ready row in auto mode is still inert`() {
+        var tapped: Int? = null
+        compose.setContent {
+            LineRow(
+                lineRowFixture(audioReady = true),
+                mode = ReadingMode.Auto,
+                isPlaying = false,
+                onTap = { tapped = it },
+            )
         }
 
         compose.onNodeWithText("Hello there").performClick()

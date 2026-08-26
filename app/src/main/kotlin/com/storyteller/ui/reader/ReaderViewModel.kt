@@ -89,19 +89,28 @@ class ReaderViewModel @Inject constructor(
                 playback = state
                 if (state == PlaybackState.Finished) playingIndex = null
 
-                // Auto is the ONLY mode that may trust the player's position. It
-                // builds one playlist per page in reading order from unit 0, so
-                // position N is unit N. Tap plays a one-item playlist and always
-                // reports position 0, so taking it here would move the highlight
-                // to line 0 on every tap - onLineTapped already recorded the real
-                // index and must win.
-                if (mode == ReadingMode.Auto && state is PlaybackState.Playing) {
-                    playingIndex = state.playlistIndex
-                    current = state.playlistIndex
-                }
-                // Only Playing carries it; the other branches are pipeline-driven
-                // and would be overwritten by the next pipeline emission anyway.
+                // Only Playing carries playback/current/playingIndex; the other
+                // branches are pipeline-driven and would be overwritten by the
+                // next pipeline emission anyway. Both field assignments below
+                // live INSIDE this check (not above it, unconditionally) so that
+                // a player event for a page that has already been reset - e.g. a
+                // late Playing(N) from the outgoing page landing after the
+                // Idle/Reading reset zeroed `current` for the next one - cannot
+                // silently move `current`/`playingIndex` with no UI to reflect
+                // it: playingState()'s clamp would then just accept that stale
+                // value for the new page instead of resetting it, opening the
+                // reader on the wrong bubble.
                 (_uiState.value as? ReaderUiState.Playing)?.let {
+                    // Auto is the ONLY mode that may trust the player's position.
+                    // It builds one playlist per page in reading order from unit
+                    // 0, so position N is unit N. Tap plays a one-item playlist
+                    // and always reports position 0, so taking it here would move
+                    // the highlight to line 0 on every tap - onLineTapped already
+                    // recorded the real index and must win.
+                    if (mode == ReadingMode.Auto && state is PlaybackState.Playing) {
+                        playingIndex = state.playlistIndex
+                        current = state.playlistIndex
+                    }
                     _uiState.value = it.copy(playback = state, playingIndex = playingIndex, current = current)
                 }
             }

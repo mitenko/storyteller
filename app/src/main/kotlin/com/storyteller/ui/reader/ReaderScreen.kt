@@ -82,6 +82,7 @@ fun ReaderContent(
                         items(state.lines) { line ->
                             LineRow(
                                 line = line,
+                                mode = state.mode,
                                 isPlaying = line.index == state.playingIndex,
                                 onTap = onLineTapped,
                             )
@@ -139,19 +140,29 @@ private fun Centered(content: @Composable () -> Unit) {
 }
 
 /**
- * Greying tracks [ReaderUiState.Line.audioReady]: a row whose audio is not
- * ready greys in BOTH modes.
+ * Greying (via [ReaderUiState.Line.audioReady]) and tappability (via [mode] +
+ * [ReaderUiState.Line.audioReady]) are deliberately separate: a row whose
+ * audio is not ready greys in BOTH modes, but only a Tap-mode, ready row is
+ * ever clickable. A row that fails either check is genuinely inert, not just
+ * faded: clickable(enabled = false) both drops the click handler and removes
+ * the row from the accessibility/click tree, so a stray tap - or a screen
+ * reader double-tap - on it still cannot fire onTap, and an Auto row never
+ * ripples or announces as actionable to TalkBack.
  *
- * Task 7 dropped the per-row `tappable` flag - the reader shows one bubble at
- * a time now, not a tappable list - so this row is gated on readiness alone
- * pending Task 8's rewrite of this screen into the bubble-at-a-time view.
+ * Task 7 dropped the standalone `ReaderUiState.Line.tappable` flag - Line no
+ * longer tracks per-row tappability - so this composable rebuilds the same
+ * mode-aware gate from [mode] and [ReaderUiState.Line.audioReady] at the one
+ * call site that still needs it, pending Task 8's rewrite of this screen into
+ * the bubble-at-a-time view. (A first pass here briefly gated on `audioReady`
+ * alone, regressing an Auto row back into the click/accessibility tree - keep
+ * the mode check.)
  */
 @Composable
-internal fun LineRow(line: ReaderUiState.Line, isPlaying: Boolean, onTap: (Int) -> Unit) {
+internal fun LineRow(line: ReaderUiState.Line, mode: ReadingMode, isPlaying: Boolean, onTap: (Int) -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable(enabled = line.audioReady) { onTap(line.index) }
+            .clickable(enabled = mode == ReadingMode.Tap && line.audioReady) { onTap(line.index) }
             .background(if (isPlaying) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,

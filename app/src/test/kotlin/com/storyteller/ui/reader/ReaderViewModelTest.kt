@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import com.storyteller.domain.ReadingPipeline
 import com.storyteller.domain.pageImage
+import com.storyteller.domain.model.BoundingBox
 import com.storyteller.domain.model.FailureReason
 import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.PipelineState
@@ -559,10 +560,28 @@ class ReaderViewModelTest {
 
     @Test fun `starts on the first unit`() = runTest {
         val vm = readerViewModel(RecordingPlayer(), mode = ReadingMode.Tap)
-        pipeline.emit(PipelineState.Ready(preparedUnits(3), pageImage()))
+        val image = pageImage()
+        // Distinct, non-null bounds per unit - the fixtures elsewhere in this
+        // file default bounds to null, which would let `image`/`bounds` silently
+        // be replaced with null everywhere and still pass (I3).
+        val units = List(3) { i ->
+            PreparedUnit(
+                unit = SpeechUnit(i, "Wolf", "line $i", BoundingBox(i * 0.1f, 0f, i * 0.1f + 0.1f, 0.1f)),
+                voiceId = "v",
+                audio = File("/tmp/$i.mp3"),
+            )
+        }
+        pipeline.emit(PipelineState.Ready(units, image))
         advanceUntilIdle()
 
-        assertEquals(0, (vm.uiState.value as ReaderUiState.Playing).current)
+        val state = vm.uiState.value as ReaderUiState.Playing
+        assertEquals(0, state.current)
+        assertEquals("the page image must reach the reader's state", image, state.image)
+        assertEquals(
+            "each line's bounds must come from its own unit",
+            units.map { it.unit.bounds },
+            state.lines.map { it.bounds },
+        )
     }
 
     @Test fun `next and previous move one unit and stop at the ends`() = runTest {
@@ -600,6 +619,80 @@ class ReaderViewModelTest {
         advanceUntilIdle()
 
         assertEquals(2, current(vm))
+    }
+
+    /**
+     * I2: `playingIndex` alone does not catch a bug that lifts
+     * `current = state.playlistIndex` out of the `mode == Auto` guard - Tap's
+     * one-item playlist always reports position 0, and if the tapped unit also
+     * happened to be unit 0 (or `current` had never moved from its start), a
+     * leaked read would coincidentally match the correct value. Moving `current`
+     * to 2 via onNext() first - away from the tapped playlist's reported
+     * position of 0 - makes a leaked read distinguishable: the buggy value
+     * would be 0, not 2.
+     */
+    @Test fun `tap does not let the player's playlist position overwrite current`() = runTest {
+        val player = RecordingPlayer()
+        val vm = readerViewModel(player, mode = ReadingMode.Tap)
+        pipeline.emit(PipelineState.Ready(preparedUnits(3)))
+        advanceUntilIdle()
+
+        vm.onNext(); vm.onNext() // current = 2; the tapped playlist position will still be 0
+        vm.onBubbleTapped()
+        advanceUntilIdle()
+
+        player.state.value = PlaybackState.Playing(0)
+        advanceUntilIdle()
+
+        assertEquals(
+            "Tap must not take current from the player's position",
+            2,
+            current(vm),
+        )
+    }
+
+    /**
+     * I4: `current`/`playingIndex` used to be written from `state.playlistIndex`
+     * unconditionally, before checking whether there was a live Playing ui
+     * state to write into. A late report from the OUTGOING page's player,
+     * arriving after the Idle/Reading reset already zeroed `current` for the
+     * next page, would still silently move `current` - and the next page's
+     * playingState() clamp would then just accept that stale value instead of
+     * resetting it, opening the reader on the wrong bubble. Pins that a late
+     * report landing while the ui state is ReadingPage (not Playing) is
+     * dropped, not stashed for the next page to inherit.
+     */
+    @Test fun `a late auto playlist report during a page reset does not leak into the next page`() = runTest {
+        val player = RecordingPlayer()
+        val vm = readerViewModel(player, mode = ReadingMode.Auto)
+        pipeline.emit(PipelineState.Ready(preparedUnits(3)))
+        advanceUntilIdle()
+
+        player.state.value = PlaybackState.Playing(2)
+        advanceUntilIdle()
+        assertEquals(2, current(vm))
+
+        // The next page starts: Idle/Reading resets `current` to 0 while there
+        // is no Playing ui state (screen shows ReadingPage).
+        pipeline.emit(PipelineState.Reading)
+        advanceUntilIdle()
+
+        // A late report from the OLD page's player arrives after the reset,
+        // while the ui state is still ReadingPage, not Playing.
+        player.state.value = PlaybackState.Playing(1)
+        advanceUntilIdle()
+
+        // The next page has enough units that a leaked `current = 1` would
+        // survive playingState()'s clamp rather than being coincidentally
+        // clamped back to a value that looks correct.
+        pipeline.emit(PipelineState.Ready(preparedUnits(3)))
+        advanceUntilIdle()
+
+        assertEquals(
+            "a late report from the outgoing page must not leak into the next page's current",
+            0,
+            current(vm),
+        )
     }
 
     private fun current(vm: ReaderViewModel) = (vm.uiState.value as ReaderUiState.Playing).current
