@@ -154,4 +154,31 @@ class CharacterBoxEvalTest {
 
         assertEquals(0.0f, scoreBubbleBoxes(units, expected).meanIou, 0.001f)
     }
+
+    @Test fun `aggregate mean is weighted by boxed count, not averaged across fixtures`() {
+        // Fixture A: 4 bubbles, all boxed, all perfect (meanIou 1.0).
+        // Fixture B: 1 bubble, boxed, IoU 0.0.
+        // A naive average of the two fixture means would be (1.0 + 0.0) / 2 = 0.5.
+        // The correct weighted mean is (1.0*4 + 0.0*1) / (4+1) = 0.8 - a different
+        // number, which is exactly what distinguishes the two implementations.
+        val fixtureA = BubbleScore(expected = 4, boxed = 4, meanIou = 1.0f)
+        val fixtureB = BubbleScore(expected = 1, boxed = 1, meanIou = 0.0f)
+
+        val aggregate = aggregateBubbleScores(listOf(fixtureA, fixtureB))
+
+        assertEquals(5, aggregate.expected)
+        assertEquals(5, aggregate.boxed)
+        assertEquals(0.8f, aggregate.meanIou, 0.0001f)
+    }
+
+    @Test fun `aggregate of total abstention across every fixture is zero, not NaN`() {
+        val fixtureA = BubbleScore(expected = 3, boxed = 0, meanIou = 0f)
+        val fixtureB = BubbleScore(expected = 2, boxed = 0, meanIou = 0f)
+
+        val aggregate = aggregateBubbleScores(listOf(fixtureA, fixtureB))
+
+        assertEquals(5, aggregate.expected)
+        assertEquals(0, aggregate.boxed)
+        assertEquals(0f, aggregate.meanIou, 0.0001f)
+    }
 }

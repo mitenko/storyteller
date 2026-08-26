@@ -58,7 +58,7 @@ private object BoundingBoxSerializer : KSerializer<BoundingBox> {
 
 /** One hand-drawn bubble box in a fixture's expected JSON, keyed by unit index. */
 @Serializable
-data class ExpectedBubble(val index: Int, @Serializable(with = BoundingBoxSerializer::class) val bounds: BoundingBox)
+internal data class ExpectedBubble(val index: Int, @Serializable(with = BoundingBoxSerializer::class) val bounds: BoundingBox)
 
 @Serializable
 private data class Expected(
@@ -123,7 +123,7 @@ internal fun scoreCharacterBoxes(expected: List<ExpectedCharacterBox>, actual: L
     return CharacterBoxScore(expected = expected.size, found = found, boxed = boxed, ious = ious)
 }
 
-data class BubbleScore(val expected: Int, val boxed: Int, val meanIou: Float)
+internal data class BubbleScore(val expected: Int, val boxed: Int, val meanIou: Float)
 
 /**
  * Scores the model's per-unit bubble boxes against hand-drawn ones.
@@ -145,6 +145,36 @@ internal fun scoreBubbleBoxes(units: List<SpeechUnit>, expected: List<ExpectedBu
         }
     }
     return BubbleScore(expected.size, boxed, if (boxed == 0) 0f else total / boxed)
+}
+
+/**
+ * Aggregate of [BubbleScore]s across a whole eval run — the exact figure the
+ * 0.5 stop condition (see evals/README.md) is judged against, so it lives in
+ * its own tested function rather than as inline arithmetic inside the
+ * `@Test` body, which never runs in CI (it is `assumeTrue`-gated).
+ *
+ * Fixtures with no `bubbles` block at all ([BubbleScore.expected] == 0) are
+ * excluded — they contributed nothing to score, the same way [scoreCharacterBoxes]
+ * treats a fixture with no `characters` block.
+ *
+ * [meanIou] is a **boxed-count-weighted** mean, not an unweighted average of
+ * the per-fixture means: each fixture's [BubbleScore.meanIou] is itself an
+ * average over that fixture's own boxed count, so reconstructing the overall
+ * mean requires weighting each one back by [BubbleScore.boxed] before summing
+ * and dividing by the total boxed count. An unweighted average of the
+ * per-fixture means would let a fixture with very few boxed bubbles count
+ * exactly as much as one with many, which is a different (and wrong) number
+ * whenever fixtures carry different bubble counts.
+ */
+internal data class BubbleAggregate(val expected: Int, val boxed: Int, val meanIou: Float)
+
+internal fun aggregateBubbleScores(scores: List<BubbleScore>): BubbleAggregate {
+    val withExpectations = scores.filter { it.expected > 0 }
+    val totalExpected = withExpectations.sumOf { it.expected }
+    val totalBoxed = withExpectations.sumOf { it.boxed }
+    val weightedIouSum = withExpectations.sumOf { (it.meanIou * it.boxed).toDouble() }
+    val meanIou = if (totalBoxed == 0) 0f else (weightedIouSum / totalBoxed).toFloat()
+    return BubbleAggregate(totalExpected, totalBoxed, meanIou)
 }
 
 /**
@@ -328,23 +358,18 @@ class VisionEval {
             )
         }
 
-        val bubbleFixturesWithExpectations = allBubbleScores.filter { it.expected > 0 }
-        if (bubbleFixturesWithExpectations.isNotEmpty()) {
-            val totalExpected = bubbleFixturesWithExpectations.sumOf { it.expected }
-            val totalBoxed = bubbleFixturesWithExpectations.sumOf { it.boxed }
-            // Reconstructed from each fixture's own mean (already an average over that
-            // fixture's boxed count), not a fresh IoU list, so this is a weighted mean
-            // over BOXED units only - exactly like the character-box aggregate above,
-            // it cannot be inflated by a model that abstains from drawing boxes. The
-            // totalBoxed/totalExpected pair printed alongside it is what makes that
-            // abstention visible: a model that returns few boxes shows up as a small
-            // totalBoxed against a larger totalExpected, not as a flattered mean.
-            val weightedIouSum = bubbleFixturesWithExpectations.sumOf { (it.meanIou * it.boxed).toDouble() }
-            val aggregateMeanIou = if (totalBoxed == 0) 0f else (weightedIouSum / totalBoxed).toFloat()
+        val bubbleAggregate = aggregateBubbleScores(allBubbleScores)
+        if (bubbleAggregate.expected > 0) {
+            // totalBoxed/totalExpected are printed right alongside the mean -
+            // exactly like the character-box aggregate above - so a model that
+            // abstains from drawing boxes shows up as a small boxed count against
+            // a larger expected count, not as a flattered mean. See
+            // [aggregateBubbleScores] for why this is a weighted mean, not an
+            // average of the per-fixture means.
             report.append(
                 ("--- bubble box mean IoU across %d/%d expected bubble(s) boxed: %.3f " +
                     "(stop and report rather than proceed if below 0.50 - see evals/README.md) ---\n")
-                    .format(totalBoxed, totalExpected, aggregateMeanIou),
+                    .format(bubbleAggregate.boxed, bubbleAggregate.expected, bubbleAggregate.meanIou),
             )
         } else {
             report.append(
