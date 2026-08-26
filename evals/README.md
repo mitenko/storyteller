@@ -123,3 +123,67 @@ hand-drawn `bounds` per character — export `ANTHROPIC_API_KEY` and
 `STORYTELLER_EVAL=1` in the environment, then run the command under "Running
 it". Whoever runs it first should record both numbers in this file, and must
 honor the stop condition above if the character-box IoU comes in under 0.5.
+
+## Speech-bubble box accuracy (IoU) — the bubble reader's gate
+
+The character-box measurement above answers whether a *character* crop (used
+for a speaker badge) is trustworthy. This section is a separate, harder
+question for a separate feature: whether the model's per-unit `bounds` — the
+box around the *speech bubble itself* — is trustworthy enough to crop and
+show as the entire content of a reading screen.
+
+The two are not the same box and one passing does not imply the other
+passes. The badge-crop feature (the one that motivated the character-box
+measurement) already failed in production use — its crops did not identify
+anyone — and that failure is the only evidence this project has about this
+model's box accuracy from *any* field the vision call returns. The bubble
+reader depends on `SpeechUnit.bounds`, a different field from the same call,
+carrying full responsibility this time: a badge crop had an emoji fallback
+sitting right next to it if the crop was bad, but a bubble crop over text has
+no fallback content on screen at all if the box is wrong — the reader's only
+fallback is rendering the transcribed text instead of the photo, and if that
+fallback fires on most units, the "bubble reader" is a text reader wearing a
+photograph.
+
+Any `expected/<name>.json` may add a `bubbles` block (format documented in
+`evals/expected/README.md`) carrying a hand-drawn box per speech unit, keyed
+by the unit's reading-order `index` rather than by speaker name. The harness
+(`scoreBubbleBoxes` in `VisionEval.kt`) matches each expected bubble to the
+model's returned unit by that index and computes intersection-over-union
+(IoU) between the hand-drawn box and the returned one. Per fixture it reports
+how many expected bubbles the model also returned a box for and the mean IoU
+of those. The final report line aggregates that mean IoU, weighted by boxed
+count, across every bubble scored in the whole run, alongside the total
+boxed/expected counts — that aggregate is the number this section is about.
+
+**Stop condition — read this before building anything on the crop path,
+without softening it:** if that aggregate mean bubble IoU comes out **below
+0.5**, stop and report rather than proceeding. 0.5 is the usual detection
+threshold; below it, a crop starts framing the wrong thing. Unlike the
+character badge, a bubble crop IS the content — there is nothing else on
+screen to fall back on but rendered text, and if that text fallback is
+firing for most units because the boxes are bad, then the feature being
+built is not a bubble reader, it is a text reader wearing a photograph. A
+score under 0.5 means the crop-based reader should not be built as designed;
+report that finding rather than proceeding to build it anyway. Only if the
+aggregate is at or above 0.5 should the run proceed and the number be
+recorded here as the baseline for future prompt changes, the same way the
+pass rate and character-box IoU above are recorded.
+
+**This number has never been measured.** No run of this eval — on this
+machine or any other, as far as this checkout's history shows — has ever
+produced a bubble-box IoU. The same blocker as above applies: `evals/fixtures/`
+is empty on every checkout by design, no `expected/*.json` file in this repo
+currently carries a `bubbles` block since there is no fixture yet to
+hand-draw one against, and the eval requires `ANTHROPIC_API_KEY` as a real
+shell environment variable, not a `local.properties` entry.
+
+To get a real number: follow "Adding a fixture" above, this time including a
+`bubbles` block with a hand-drawn box per speech unit for at least a handful
+of pages — cover both plain speech bubbles and any hand-lettered/no-outline
+case, since those are the ones most likely to break a box. Export
+`ANTHROPIC_API_KEY` and `STORYTELLER_EVAL=1`, run the command under "Running
+it", and record the number here. Whoever runs it first must honor the stop
+condition above if the aggregate mean bubble IoU comes in under 0.5 — that
+means stopping and reporting, not proceeding to build the cropped bubble
+reader regardless.

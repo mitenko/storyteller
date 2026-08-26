@@ -6,9 +6,14 @@ import com.storyteller.data.page.ClaudeApi
 import com.storyteller.data.page.PageReaderImpl
 import com.storyteller.domain.model.BoundingBox
 import com.storyteller.domain.model.ParsedCharacter
+import com.storyteller.domain.model.SpeechUnit
 import com.storyteller.ui.capture.downscaleToPageImage
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -31,8 +36,37 @@ private data class ExpectedBox(val left: Float, val top: Float, val right: Float
 @Serializable
 private data class ExpectedCharacter(val name: String, val emojiExpected: Boolean = false, val bounds: ExpectedBox? = null)
 
+/**
+ * [BoundingBox] lives in `domain` and isn't itself `@Serializable` (production
+ * decodes its own DTO and converts, see [PageReaderImpl]); this mirrors that
+ * without touching the domain class, so [ExpectedBubble] can both be built
+ * directly with a [BoundingBox] (as the unit tests do) and JSON-decoded (as
+ * [Expected] does) using the same `left`/`top`/`right`/`bottom` shape.
+ */
+private object BoundingBoxSerializer : KSerializer<BoundingBox> {
+    override val descriptor: SerialDescriptor = ExpectedBox.serializer().descriptor
+
+    override fun serialize(encoder: Encoder, value: BoundingBox) {
+        encoder.encodeSerializableValue(ExpectedBox.serializer(), ExpectedBox(value.left, value.top, value.right, value.bottom))
+    }
+
+    override fun deserialize(decoder: Decoder): BoundingBox {
+        val b = decoder.decodeSerializableValue(ExpectedBox.serializer())
+        return BoundingBox(b.left, b.top, b.right, b.bottom)
+    }
+}
+
+/** One hand-drawn bubble box in a fixture's expected JSON, keyed by unit index. */
 @Serializable
-private data class Expected(val speakers: List<String>, val minUnits: Int, val characters: List<ExpectedCharacter> = emptyList())
+data class ExpectedBubble(val index: Int, @Serializable(with = BoundingBoxSerializer::class) val bounds: BoundingBox)
+
+@Serializable
+private data class Expected(
+    val speakers: List<String>,
+    val minUnits: Int,
+    val characters: List<ExpectedCharacter> = emptyList(),
+    val bubbles: List<ExpectedBubble> = emptyList(),
+)
 
 /** Pure input to [scoreCharacterBoxes] — decoupled from the JSON DTO so the scorer is testable without Robolectric. */
 internal data class ExpectedCharacterBox(val name: String, val bounds: BoundingBox?)
@@ -87,6 +121,30 @@ internal fun scoreCharacterBoxes(expected: List<ExpectedCharacterBox>, actual: L
         ious += iou(actualBounds, expectedBounds)
     }
     return CharacterBoxScore(expected = expected.size, found = found, boxed = boxed, ious = ious)
+}
+
+data class BubbleScore(val expected: Int, val boxed: Int, val meanIou: Float)
+
+/**
+ * Scores the model's per-unit bubble boxes against hand-drawn ones.
+ *
+ * [expected] counts every unit a human drew a box for; [boxed] counts those the
+ * model also returned a box for; [meanIou] averages IoU over that overlap only,
+ * so a model that returns few boxes cannot raise its own mean by abstaining -
+ * the gap between expected and boxed is what exposes that.
+ */
+internal fun scoreBubbleBoxes(units: List<SpeechUnit>, expected: List<ExpectedBubble>): BubbleScore {
+    val actual = units.associateBy { it.index }
+    var boxed = 0
+    var total = 0f
+    expected.forEach { e ->
+        val bounds = actual[e.index]?.bounds
+        if (bounds != null) {
+            boxed++
+            total += iou(bounds, e.bounds)
+        }
+    }
+    return BubbleScore(expected.size, boxed, if (boxed == 0) 0f else total / boxed)
 }
 
 /**
@@ -200,6 +258,7 @@ class VisionEval {
 
         val rows = mutableListOf<EvalRow>()
         val allCharacterIous = mutableListOf<Float>()
+        val allBubbleScores = mutableListOf<BubbleScore>()
         val report = StringBuilder("\n=== Vision eval ===\n")
 
         for (photo in fixtures) {
@@ -233,6 +292,9 @@ class VisionEval {
             val charScore = scoreCharacterBoxes(expectedCharBoxes, page.characters)
             allCharacterIous += charScore.ious
 
+            val bubbleScore = scoreBubbleBoxes(units, expected.bubbles)
+            allBubbleScores += bubbleScore
+
             report.append(if (passed) "PASS  " else "FAIL  ")
                 .append(photo.name)
                 .append(" — units=").append(units.size).append("/min ").append(expected.minUnits)
@@ -244,6 +306,10 @@ class VisionEval {
                 report.append(", characters=").append(charScore.found).append("/").append(charScore.expected)
                     .append(" found, ").append(charScore.boxed).append("/").append(charScore.found)
                     .append(" boxed, meanIoU=").append(iouStr)
+            }
+            if (bubbleScore.expected > 0) {
+                report.append(", bubbles=").append(bubbleScore.boxed).append("/").append(bubbleScore.expected)
+                    .append(" boxed, meanIoU=").append("%.3f".format(bubbleScore.meanIou))
             }
             report.append('\n')
         }
@@ -259,6 +325,30 @@ class VisionEval {
             report.append(
                 "--- no character box comparisons available: no expected/*.json in this run supplied " +
                     "both a hand-drawn box and a character the model actually returned ---\n",
+            )
+        }
+
+        val bubbleFixturesWithExpectations = allBubbleScores.filter { it.expected > 0 }
+        if (bubbleFixturesWithExpectations.isNotEmpty()) {
+            val totalExpected = bubbleFixturesWithExpectations.sumOf { it.expected }
+            val totalBoxed = bubbleFixturesWithExpectations.sumOf { it.boxed }
+            // Reconstructed from each fixture's own mean (already an average over that
+            // fixture's boxed count), not a fresh IoU list, so this is a weighted mean
+            // over BOXED units only - exactly like the character-box aggregate above,
+            // it cannot be inflated by a model that abstains from drawing boxes. The
+            // totalBoxed/totalExpected pair printed alongside it is what makes that
+            // abstention visible: a model that returns few boxes shows up as a small
+            // totalBoxed against a larger totalExpected, not as a flattered mean.
+            val weightedIouSum = bubbleFixturesWithExpectations.sumOf { (it.meanIou * it.boxed).toDouble() }
+            val aggregateMeanIou = if (totalBoxed == 0) 0f else (weightedIouSum / totalBoxed).toFloat()
+            report.append(
+                ("--- bubble box mean IoU across %d/%d expected bubble(s) boxed: %.3f " +
+                    "(stop and report rather than proceed if below 0.50 - see evals/README.md) ---\n")
+                    .format(totalBoxed, totalExpected, aggregateMeanIou),
+            )
+        } else {
+            report.append(
+                "--- no bubble box comparisons available: no expected/*.json in this run supplied a bubbles block ---\n",
             )
         }
         println(report)

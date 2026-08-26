@@ -2,6 +2,7 @@ package com.storyteller.evals
 
 import com.storyteller.domain.model.BoundingBox
 import com.storyteller.domain.model.ParsedCharacter
+import com.storyteller.domain.model.SpeechUnit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -128,5 +129,29 @@ class CharacterBoxEvalTest {
         assertEquals(2, result.found)
         assertEquals(2, result.boxed)
         assertEquals(0.5f, result.meanIou!!, 0.0001f)
+    }
+
+    @Test fun `scores a bubble box against its hand-drawn box`() {
+        val units = listOf(
+            SpeechUnit(0, "Bear", "Hello", BoundingBox(0.10f, 0.10f, 0.50f, 0.30f)),
+            SpeechUnit(1, "Mouse", "Hi", null),
+        )
+        val expected = listOf(
+            ExpectedBubble(0, BoundingBox(0.10f, 0.10f, 0.50f, 0.30f)),
+            ExpectedBubble(1, BoundingBox(0.60f, 0.60f, 0.90f, 0.80f)),
+        )
+
+        val score = scoreBubbleBoxes(units, expected)
+
+        assertEquals(2, score.expected)
+        assertEquals(1, score.boxed)
+        assertEquals(1.0f, score.meanIou, 0.001f)
+    }
+
+    @Test fun `a bubble box that misses entirely scores zero`() {
+        val units = listOf(SpeechUnit(0, "Bear", "Hello", BoundingBox(0.0f, 0.0f, 0.2f, 0.2f)))
+        val expected = listOf(ExpectedBubble(0, BoundingBox(0.8f, 0.8f, 1.0f, 1.0f)))
+
+        assertEquals(0.0f, scoreBubbleBoxes(units, expected).meanIou, 0.001f)
     }
 }
