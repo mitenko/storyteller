@@ -66,6 +66,24 @@ class FakeSettingsRepository(initial: ReadingMode = ReadingMode.Auto) : Settings
     override suspend fun setMode(mode: ReadingMode) { modes.value = mode }
 }
 
+/**
+ * Emits once successfully then throws on EVERY collection. `settings.mode` is
+ * collected twice by ReaderViewModel's init - once via `.first()` (which
+ * cancels the flow right after that first emission, so the throw never fires
+ * for that collection) and once by the sibling `launch { ... collect { } }`
+ * (a fresh, independent collection that runs the emit-then-throw body in
+ * full). This is what F1 pins: a fault surfacing AFTER that sibling's first
+ * emission must not cancel the coroutine that also runs pipeline.state.collect.
+ */
+class ThrowsAfterFirstEmissionSettingsRepository : SettingsRepository {
+    override val mode: Flow<ReadingMode> = flow {
+        emit(ReadingMode.Auto)
+        throw RuntimeException("settings fault after first emission")
+    }
+
+    override suspend fun setMode(mode: ReadingMode) = Unit
+}
+
 class FakePlayer : PagePlayer {
     override val state = MutableStateFlow<PlaybackState>(PlaybackState.Idle)
     val played = mutableListOf<Int>()
@@ -163,7 +181,10 @@ class ReaderViewModelTest {
         runCurrent()
         val preparing = vm.uiState.value as ReaderUiState.Playing
         assertEquals(3, preparing.lines.size)
-        assertEquals(listOf(true, true, true), preparing.lines.map { it.enabled }) // Auto shows every line enabled
+        // F7: Auto rows grey by readiness just like Tap rows do; only unit 0 is
+        // ready here. Auto rows are also never tappable.
+        assertEquals(listOf(true, false, false), preparing.lines.map { it.audioReady })
+        assertTrue("Auto rows are never tappable", preparing.lines.none { it.tappable })
 
         pipeline.states.value = PipelineState.Ready(listOf(prepared(0), prepared(1)))
         runCurrent()
@@ -378,6 +399,31 @@ class ReaderViewModelTest {
         assertEquals("popping the reader entry must stop playback", 1, player.stops)
     }
 
+    /**
+     * F3: belt-and-suspenders for the narrator-badge bug at the ReaderViewModel
+     * side. Even if a badges map somehow carried an entry keyed to a
+     * lower-cased "narrator" (e.g. BadgeRepositoryImpl's own filter missed it),
+     * this comparison must independently recognise the speaker as the narrator
+     * and render Badge.None - it must not rely solely on the map never
+     * containing that key.
+     */
+    @Test fun `a lowercase narrator speaker renders no badge even if the badges map carries an entry for it`() =
+        runTest(dispatcher) {
+            val pipeline = FakePipeline()
+            val player = FakePlayer()
+            val vm = ReaderViewModel(pipeline, player, FakeSettingsRepository())
+
+            val unit = SpeechUnit(0, "narrator", "Once upon a time,", null)
+            pipeline.states.value = PipelineState.Ready(
+                listOf(PreparedUnit(unit, "v", File("/tmp/0.mp3"))),
+                mapOf("narrator" to com.storyteller.domain.model.Badge.Emoji("🧑")),
+            )
+            runCurrent()
+
+            val line = (vm.uiState.value as ReaderUiState.Playing).lines.single()
+            assertEquals(com.storyteller.domain.model.Badge.None, line.badge)
+        }
+
     // --- Mode-aware behaviour (Task 8) ---------------------------------------
 
     @Test fun `tap mode does not start playback on its own`() = runTest {
@@ -436,7 +482,29 @@ class ReaderViewModelTest {
 
         val lines = (vm.uiState.value as ReaderUiState.Playing).lines
         assertEquals(3, lines.size)
-        assertEquals(listOf(true, false, false), lines.map { it.enabled })
+        assertEquals(listOf(true, false, false), lines.map { it.audioReady })
+        assertEquals(listOf(true, false, false), lines.map { it.tappable })
+    }
+
+    /** F7: a row not yet synthesized must grey in Auto too, not just Tap. */
+    @Test fun `an auto-mode row whose audio is not ready renders greyed`() = runTest {
+        val vm = readerViewModel(RecordingPlayer(), mode = ReadingMode.Auto)
+        pipeline.emit(PipelineState.Preparing(speechUnits(3), preparedUnits(1), emptyMap()))
+        advanceUntilIdle()
+
+        val lines = (vm.uiState.value as ReaderUiState.Playing).lines
+        assertEquals(listOf(true, false, false), lines.map { it.audioReady })
+    }
+
+    /** F7: Auto never acts on a tap (onLineTapped ignores it), so no Auto row may be tappable. */
+    @Test fun `an auto-mode row is never tappable, ready or not`() = runTest {
+        val vm = readerViewModel(RecordingPlayer(), mode = ReadingMode.Auto)
+        pipeline.emit(PipelineState.Ready(preparedUnits(2), emptyMap()))
+        advanceUntilIdle()
+
+        val lines = (vm.uiState.value as ReaderUiState.Playing).lines
+        assertTrue(lines.all { it.audioReady })
+        assertTrue("no Auto row may be tappable even once ready", lines.none { it.tappable })
     }
 
     /**
@@ -450,6 +518,31 @@ class ReaderViewModelTest {
      * when the ViewModel is constructed with mode fixed to Tap, and no autoplay may
      * ever happen.
      */
+    /**
+     * F1: the sibling `launch { settings.mode.collect { mode = it } }` used to
+     * have no `.catch`, unlike the `.first()` call right above it in init. Both
+     * launches are non-supervisor children of the same coroutine that also runs
+     * `pipeline.state.collect` directly (not in its own launch) - so an uncaught
+     * throw from the sibling collector cancels that whole coroutine, silently
+     * killing pipeline-state handling for the rest of the page's life. A settings
+     * fault must never cost the page that is already on screen.
+     */
+    @Test fun `a settings mode fault after the first emission does not stop later pipeline states from being handled`() =
+        runTest {
+            val pipeline = FakePipeline()
+            val player = FakePlayer()
+            val vm = ReaderViewModel(pipeline, player, ThrowsAfterFirstEmissionSettingsRepository())
+            advanceUntilIdle() // let mode resolve via first(), then let the sibling collector fault
+
+            pipeline.states.value = PipelineState.Ready(listOf(prepared(0)))
+            advanceUntilIdle()
+
+            assertTrue(
+                "pipeline states must still be handled after a later settings.mode fault",
+                vm.uiState.value is ReaderUiState.Playing,
+            )
+        }
+
     @Test fun `mode resolves before an already-ready pipeline state is handled`() = runTest {
         pipeline.emit(PipelineState.Ready(preparedUnits(2), emptyMap()))
         val player = RecordingPlayer()

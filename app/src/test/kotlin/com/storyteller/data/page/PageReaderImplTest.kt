@@ -240,6 +240,25 @@ class PageReaderImplTest {
         assertEquals(0.3f, page.characters.single().bounds!!.right, 0.001f)
     }
 
+    /**
+     * F3: SpeechUnit.speaker is trimmed (`p.speaker.trim().ifBlank { NARRATOR }`
+     * in toSpeechUnits), but ParsedCharacter.name previously was not - so " Bear "
+     * from the model produced a badge map key that could never match a unit
+     * whose speaker came back trimmed to "Bear", silently losing the badge past
+     * the emoji straight to None. Trimming here, in the one place ParsedCharacter
+     * is built, is what keeps the two keys in agreement.
+     */
+    @Test fun `trims a character name so it matches the trimmed speaker key`() = runTest {
+        enqueueTextBlock(
+            """{"units":[{"speaker":"Bear","text":"Hello","bounds":null}],
+               "characters":[{"name":" Bear ","emoji":"🐻","bounds":null}]}""",
+        )
+
+        val page = reader().read(image(1, 2, 3)).getOrThrow()
+
+        assertEquals("Bear", page.characters.single().name)
+    }
+
     @Test fun `tolerates a page with no characters array entries`() = runTest {
         enqueueTextBlock("""{"units":[{"speaker":"Narrator","text":"Once","bounds":null}],"characters":[]}""")
 

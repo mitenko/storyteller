@@ -137,8 +137,11 @@ class PageReaderImpl(
         units = units.map { u ->
             ParsedUnit(speaker = u.speaker, text = u.text, bounds = u.bounds?.toDomain())
         }.toSpeechUnits(),
+        // Trimmed to match SpeechUnit.speaker (toSpeechUnits trims too): without
+        // this, " Bear " here and "Bear" on a unit produce badge map keys that
+        // never agree, and the badge is lost past the emoji straight to None.
         characters = characters.map { c ->
-            ParsedCharacter(name = c.name, emoji = c.emoji?.takeIf { it.isNotBlank() }, bounds = c.bounds?.toDomain())
+            ParsedCharacter(name = c.name.trim(), emoji = c.emoji?.takeIf { it.isNotBlank() }, bounds = c.bounds?.toDomain())
         },
     )
 }

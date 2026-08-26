@@ -2,9 +2,13 @@ package com.storyteller.data.settings
 
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import com.storyteller.data.local.SettingEntity
+import com.storyteller.data.local.SettingsDao
 import com.storyteller.data.local.StorytellerDatabase
 import com.storyteller.domain.model.ReadingMode
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -35,5 +39,24 @@ class SettingsRepositoryImplTest {
     @Test fun `an unrecognised stored value falls back to auto`() = runTest {
         db.settingsDao().put(com.storyteller.data.local.SettingEntity("reading_mode", "sideways"))
         assertEquals(ReadingMode.Auto, repo.mode.first())
+    }
+
+    /**
+     * F2 / spec ยง10: "Settings read fails -> Default to Auto". The existing
+     * fallback in `mode`'s `map` only covers a NULL row (nothing stored yet);
+     * it does nothing for a DAO Flow that throws outright (disk fault, corrupt
+     * database - the exact cases VoiceRepositoryImpl's kdoc enumerates for
+     * writes). Both of `mode`'s consumers - SettingsViewModel and
+     * ReaderViewModel's `.catch { emit(Auto) }.first()` - only see a safe
+     * default if the repository itself degrades a throwing read to Auto.
+     */
+    @Test fun `a throwing read defaults to Auto rather than propagating`() = runTest {
+        val throwing = object : SettingsDao {
+            override fun observe(key: String): Flow<SettingEntity?> = flow { throw RuntimeException("disk fault") }
+            override suspend fun put(entity: SettingEntity) = throw RuntimeException("disk fault")
+        }
+        val faultyRepo = SettingsRepositoryImpl(throwing)
+
+        assertEquals(ReadingMode.Auto, faultyRepo.mode.first())
     }
 }

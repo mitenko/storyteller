@@ -5,12 +5,12 @@ import androidx.lifecycle.viewModelScope
 import com.storyteller.domain.ReadingPipeline
 import com.storyteller.domain.model.Badge
 import com.storyteller.domain.model.FailureReason
-import com.storyteller.domain.model.NARRATOR
 import com.storyteller.domain.model.PipelineState
 import com.storyteller.domain.model.PlaybackState
 import com.storyteller.domain.model.PreparedUnit
 import com.storyteller.domain.model.ReadingMode
 import com.storyteller.domain.model.SpeechUnit
+import com.storyteller.domain.model.isNarrator
 import com.storyteller.domain.repository.PagePlayer
 import com.storyteller.domain.repository.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -73,7 +73,13 @@ class ReaderViewModel @Inject constructor(
             // is ever collected, leaving the reader stuck on ReadingPage with no
             // error screen - a settings fault must never stop a page being read.
             mode = settings.mode.catch { emit(ReadingMode.Auto) }.first()
-            launch { settings.mode.collect { mode = it } }
+            // Guarded the same way as the .first() above: this launch is a
+            // non-supervisor child of the coroutine that runs
+            // pipeline.state.collect directly (not in its own launch), so an
+            // uncaught throw here would cancel that coroutine too - silently
+            // killing pipeline-state handling for the rest of the page's life,
+            // long after start-up. A settings fault must never cost the page.
+            launch { settings.mode.catch { }.collect { mode = it } }
             pipeline.state.collect { state -> onPipelineState(state) }
         }
         viewModelScope.launch {
@@ -185,15 +191,26 @@ class ReaderViewModel @Inject constructor(
         val readyIndices = ready.mapTo(mutableSetOf()) { it.unit.index }
         return ReaderUiState.Playing(
             lines = all.map { u ->
+                val isReady = u.index in readyIndices
                 ReaderUiState.Line(
                     index = u.index,
                     speaker = u.speaker,
                     text = u.text,
                     // badges omits the narrator entirely rather than mapping it to
-                    // None, so NARRATOR must short-circuit before the lookup -
-                    // badges.getValue(speaker) would throw for every narrator line.
-                    badge = if (u.speaker == NARRATOR) Badge.None else badges[u.speaker] ?: Badge.None,
-                    enabled = mode == ReadingMode.Auto || u.index in readyIndices,
+                    // None, so a narrator speaker must short-circuit before the
+                    // lookup - badges.getValue(speaker) would throw for every
+                    // narrator line. isNarrator() trims and case-folds (same rule
+                    // as BadgeRepositoryImpl's own filter) because SpeechUnit.speaker
+                    // is sourced independently of ParsedCharacter.name and may not
+                    // share its exact casing.
+                    badge = if (isNarrator(u.speaker)) Badge.None else badges[u.speaker] ?: Badge.None,
+                    // Greying tracks readiness alone, in both modes - Auto used to
+                    // report every row ready regardless of synthesis progress,
+                    // which lost Auto's only progress indication (F7). Tappability
+                    // is the separate, narrower condition: only Tap mode acts on a
+                    // tap at all (see onLineTapped), and only once ready.
+                    audioReady = isReady,
+                    tappable = mode == ReadingMode.Tap && isReady,
                 )
             },
             playback = playback,

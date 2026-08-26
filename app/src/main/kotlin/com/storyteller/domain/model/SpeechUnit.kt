@@ -20,6 +20,18 @@ data class PreparedUnit(val unit: SpeechUnit, val voiceId: String, val audio: Fi
 const val NARRATOR = "Narrator"
 
 /**
+ * Whatever the model returns for the narrator ("Narrator", "narrator", padded
+ * with whitespace...) must be treated as the narrator everywhere a speaker or
+ * character name is compared against [NARRATOR] - trimmed and case-folded, the
+ * same rule at every comparison site. A single site normalizing to the exact
+ * [NARRATOR] spelling is not enough on its own: [SpeechUnit.speaker] is sourced
+ * independently of [ParsedCharacter.name] (see [toSpeechUnits]), so a
+ * comparison against the literal constant can pass for one and silently fail
+ * for the other.
+ */
+fun isNarrator(name: String): Boolean = name.trim().equals(NARRATOR, ignoreCase = true)
+
+/**
  * Assigns reading-order indices from list position, drops units with no
  * speakable text, and normalizes a missing speaker to [NARRATOR].
  *

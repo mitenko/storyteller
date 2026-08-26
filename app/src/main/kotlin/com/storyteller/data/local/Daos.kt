@@ -18,9 +18,14 @@ interface VoiceDao {
     suspend fun upsert(entity: CharacterVoiceEntity)
 
     /**
-     * Writes the crop path only when there is not one already: first sighting
-     * wins, mirroring how this table pins a voice. Returns rows updated, so the
-     * caller can tell a write from a no-op.
+     * Write-only record of the crop path; nothing in app/src/main reads
+     * badgePath back (see CharacterVoiceEntity.badgePath) - disk, via a
+     * deterministic filesDir path, is authoritative for badge resolution.
+     * Writes only when there is not one already: first sighting wins,
+     * mirroring how this table pins a voice. Returns rows updated, so the
+     * caller can tell a write from a no-op - notably, a no-op is the NORMAL
+     * outcome on a first sighting, because this row does not exist yet at
+     * that point (see CharacterVoiceEntity.badgePath).
      */
     @Query("UPDATE character_voice SET badgePath = :path WHERE character = :character AND badgePath IS NULL")
     suspend fun setBadgePath(character: String, path: String): Int

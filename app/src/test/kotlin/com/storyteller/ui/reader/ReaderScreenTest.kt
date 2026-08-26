@@ -29,7 +29,7 @@ class ReaderScreenTest {
      * tap handling and highlighting is Task 9's job, not this task's.
      */
     private fun line(speaker: String, text: String, index: Int = 0) =
-        ReaderUiState.Line(index, speaker, text, Badge.None, enabled = true)
+        ReaderUiState.Line(index, speaker, text, Badge.None, audioReady = true, tappable = true)
 
     private fun playing(lines: List<ReaderUiState.Line>, playback: PlaybackState) =
         ReaderUiState.Playing(lines, playback, ReadingMode.Auto, playingIndex = null)
@@ -171,10 +171,14 @@ class ReaderScreenTest {
         )
     }
 
-    private fun lineRowFixture(index: Int = 0, enabled: Boolean = true, badge: Badge = Badge.None) =
-        ReaderUiState.Line(index, "Bear", "Hello there", badge, enabled)
+    private fun lineRowFixture(
+        index: Int = 0,
+        audioReady: Boolean = true,
+        tappable: Boolean = true,
+        badge: Badge = Badge.None,
+    ) = ReaderUiState.Line(index, "Bear", "Hello there", badge, audioReady, tappable)
 
-    @Test fun `an enabled row reports the index it was given`() {
+    @Test fun `a tappable row reports the index it was given`() {
         var tapped: Int? = null
         compose.setContent { LineRow(lineRowFixture(index = 2), isPlaying = false, onTap = { tapped = it }) }
 
@@ -183,10 +187,31 @@ class ReaderScreenTest {
         assertEquals(2, tapped)
     }
 
-    @Test fun `a disabled row is inert`() {
+    @Test fun `a non-tappable row is inert`() {
         var tapped: Int? = null
         compose.setContent {
-            LineRow(lineRowFixture(enabled = false), isPlaying = false, onTap = { tapped = it })
+            LineRow(lineRowFixture(tappable = false), isPlaying = false, onTap = { tapped = it })
+        }
+
+        compose.onNodeWithText("Hello there").performClick()
+
+        assertEquals(null, tapped)
+    }
+
+    /**
+     * F7: an Auto-mode row is never tappable REGARDLESS of readiness -
+     * audioReady and tappable are independent flags now, and this pins that a
+     * ready-but-not-tappable row (what every Auto row looks like) still does
+     * not fire onTap.
+     */
+    @Test fun `a ready but not-tappable row is still inert`() {
+        var tapped: Int? = null
+        compose.setContent {
+            LineRow(
+                lineRowFixture(audioReady = true, tappable = false),
+                isPlaying = false,
+                onTap = { tapped = it },
+            )
         }
 
         compose.onNodeWithText("Hello there").performClick()

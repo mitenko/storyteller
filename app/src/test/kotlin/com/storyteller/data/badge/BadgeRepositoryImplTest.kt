@@ -1,6 +1,7 @@
 package com.storyteller.data.badge
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.storyteller.data.local.CharacterVoiceEntity
@@ -88,6 +89,22 @@ class BadgeRepositoryImplTest {
         assertTrue((badge as Badge.Image).file.length() > 0)
     }
 
+    /**
+     * F3: the narrator is always blank (spec ยง4), "whatever the model returns"
+     * for its casing. `badgesFor`'s filter used to compare with `!= NARRATOR`
+     * exactly, so a lowercase "narrator" character survived it and got a badge
+     * map entry - which ReaderViewModel's own exact-match narrator check also
+     * failed to catch, so a narrator line rendered a badge.
+     */
+    @Test fun `a narrator-named character in any case gets no badge entry`() = runTest {
+        val badges = repo.badgesFor(
+            page(),
+            listOf(ParsedCharacter("narrator", "🧑", BoundingBox(0.1f, 0.1f, 0.4f, 0.5f))),
+        )
+
+        assertTrue("the badges map must omit the narrator key entirely", badges.isEmpty())
+    }
+
     @Test fun `a sliver box degrades to the emoji rather than failing`() = runTest {
         db.voiceDao().upsert(CharacterVoiceEntity("Bear", "v1"))
 
@@ -97,5 +114,66 @@ class BadgeRepositoryImplTest {
         )
 
         assertEquals(Badge.Emoji("🐻"), badges.getValue("Bear"))
+    }
+
+    /**
+     * F4: badgesFor used to decode the full page bitmap (~12 MB ARGB_8888 at
+     * 1568px) once PER CHARACTER via cropToTemp. Four new characters meant four
+     * decodes before the pipeline ever reached Preparing. This pins that one
+     * badgesFor call sharing multiple fresh crops decodes the page exactly once.
+     */
+    @Test fun `decodes the page bitmap once for the whole call regardless of how many characters need a fresh crop`() =
+        runTest {
+            var decodeCount = 0
+            val countingRepo = BadgeRepositoryImpl(db.voiceDao(), context.filesDir) { image ->
+                decodeCount++
+                BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size)
+            }
+
+            countingRepo.badgesFor(
+                page(),
+                listOf(
+                    ParsedCharacter("Bear", "🐻", BoundingBox(0.1f, 0.1f, 0.4f, 0.5f)),
+                    ParsedCharacter("Wolf", "🐺", BoundingBox(0.5f, 0.5f, 0.9f, 0.9f)),
+                ),
+            )
+
+            assertEquals(1, decodeCount)
+        }
+
+    /** F4: the stored-crop fast path must still decode nothing at all. */
+    @Test fun `a page where every character already has a stored crop decodes nothing`() = runTest {
+        db.voiceDao().upsert(CharacterVoiceEntity("Bear", "v1"))
+        // Prime a stored crop via the plain repo (same filesDir/badgesDir as countingRepo below).
+        repo.badgesFor(page(), listOf(ParsedCharacter("Bear", "🐻", BoundingBox(0.1f, 0.1f, 0.4f, 0.5f))))
+
+        var decodeCount = 0
+        val countingRepo = BadgeRepositoryImpl(db.voiceDao(), context.filesDir) { image ->
+            decodeCount++
+            BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size)
+        }
+
+        countingRepo.badgesFor(page(), listOf(ParsedCharacter("Bear", "🐻", BoundingBox(0.1f, 0.1f, 0.4f, 0.5f))))
+
+        assertEquals(0, decodeCount)
+    }
+
+    /**
+     * F5: a stored crop can be a large fraction of a 1568px page and renders
+     * into a 40dp circle; BadgeIcon decodes whatever is on disk with no
+     * downsampling of its own, so the cap must be applied here, at the write
+     * side, before compressing.
+     */
+    @Test fun `crops are downscaled to a bounded long edge before compressing`() = runTest {
+        db.voiceDao().upsert(CharacterVoiceEntity("Bear", "v1"))
+
+        val badges = repo.badgesFor(page(), listOf(ParsedCharacter("Bear", null, BoundingBox(0.0f, 0.0f, 1f, 1f))))
+        val badge = badges.getValue("Bear") as Badge.Image
+        val decoded = BitmapFactory.decodeFile(badge.file.path)
+
+        assertTrue(
+            "expected the crop's long edge capped at $MAX_BADGE_LONG_EDGE_PX, was ${maxOf(decoded.width, decoded.height)}",
+            maxOf(decoded.width, decoded.height) <= MAX_BADGE_LONG_EDGE_PX,
+        )
     }
 }

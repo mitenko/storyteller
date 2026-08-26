@@ -10,8 +10,16 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
+/**
+ * F6: despite the old filename, this executes NO migration. Room.inMemoryDatabaseBuilder
+ * builds the CURRENT schema directly from the @Entity/@Dao annotations - it never
+ * runs MIGRATION_1_2 or MIGRATION_2_3 (see StorytellerDatabase), so the migration
+ * SQL itself is unexercised by this class or anywhere else in this suite. What IS
+ * covered here is genuinely useful (findCurrent's staleness check and
+ * setBadgePath's first-write-wins), just not migrations - hence the rename.
+ */
 @RunWith(RobolectricTestRunner::class)
-class MigrationTest {
+class ParseVersionAndBadgePathDaoTest {
 
     private val db = Room.inMemoryDatabaseBuilder(
         ApplicationProvider.getApplicationContext(),

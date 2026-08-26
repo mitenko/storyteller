@@ -28,7 +28,19 @@ sealed interface ReaderUiState {
         val speaker: String,
         val text: String,
         val badge: Badge,
-        /** False until this line's audio has been synthesized. */
-        val enabled: Boolean,
+        /**
+         * False until this line's audio has been synthesized - drives the row's
+         * greyed-out rendering in BOTH modes. Before F7 this was conflated with
+         * [tappable] under one `enabled` flag, so Auto mode (where every row is
+         * always tappable-in-spirit) never greyed at all and lost its only
+         * synthesis-progress indication.
+         */
+        val audioReady: Boolean,
+        /**
+         * True only in Tap mode, and only once [audioReady]. Auto mode is never
+         * tappable - onLineTapped ignores it there - so an Auto row must not
+         * ripple on touch or announce as actionable to TalkBack.
+         */
+        val tappable: Boolean,
     )
 }
