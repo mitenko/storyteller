@@ -385,6 +385,6 @@ private class CancellingPageReader : PageReader {
 private class SlowPageReader(private val units: List<SpeechUnit>) : PageReader {
     override suspend fun read(image: PageImage): Result<ParsedPage> {
         delay(100)
-        return Result.success(ParsedPage(units, emptyList()))
+        return Result.success(ParsedPage(units))
     }
 }

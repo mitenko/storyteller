@@ -1,19 +1,17 @@
 package com.storyteller.evals
 
 import com.storyteller.domain.model.BoundingBox
-import com.storyteller.domain.model.ParsedCharacter
 import com.storyteller.domain.model.SpeechUnit
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Test
 
 /**
- * Pure coverage for the IoU maths and character-matching logic Task 11 adds,
- * exercised without Robolectric or a network call — mirrors EvalTallyTest's
+ * Pure coverage for the IoU maths and the per-unit bubble-box scoring/aggregation
+ * logic, exercised without Robolectric or a network call — mirrors EvalTallyTest's
  * approach of testing the scoring functions directly rather than only via
  * the live (skipped-by-default) VisionEval test.
  */
-class CharacterBoxEvalTest {
+class BubbleBoxEvalTest {
 
     private fun box(left: Float, top: Float, right: Float, bottom: Float) = BoundingBox(left, top, right, bottom)
 
@@ -61,74 +59,6 @@ class CharacterBoxEvalTest {
         val a = box(0f, 0f, 0.6f, 0.4f)
         val b = box(0.2f, 0.1f, 0.8f, 0.5f)
         assertEquals(iou(a, b), iou(b, a), 0.0001f)
-    }
-
-    @Test fun `no expected characters scores nothing`() {
-        val result = scoreCharacterBoxes(emptyList(), listOf(ParsedCharacter("Bear", null, box(0f, 0f, 1f, 1f))))
-        assertEquals(0, result.expected)
-        assertEquals(0, result.found)
-        assertEquals(0, result.boxed)
-        assertNull(result.meanIou)
-    }
-
-    @Test fun `expected character absent from the model's output is counted as not found`() {
-        val expected = listOf(ExpectedCharacterBox("Bear", box(0.1f, 0.1f, 0.5f, 0.5f)))
-        val result = scoreCharacterBoxes(expected, listOf(ParsedCharacter("Wolf", null, box(0f, 0f, 1f, 1f))))
-        assertEquals(1, result.expected)
-        assertEquals(0, result.found)
-        assertEquals(0, result.boxed)
-        assertNull(result.meanIou)
-    }
-
-    @Test fun `matches by trimmed case-insensitive name`() {
-        val expected = listOf(ExpectedCharacterBox("Bear", null))
-        val result = scoreCharacterBoxes(expected, listOf(ParsedCharacter("  bear  ", null, null)))
-        assertEquals(1, result.found)
-    }
-
-    @Test fun `found but no returned box counts as found, not boxed`() {
-        val expected = listOf(ExpectedCharacterBox("Bear", box(0.1f, 0.1f, 0.5f, 0.5f)))
-        val result = scoreCharacterBoxes(expected, listOf(ParsedCharacter("Bear", "🐻", bounds = null)))
-        assertEquals(1, result.found)
-        assertEquals(0, result.boxed)
-        assertNull(result.meanIou)
-    }
-
-    @Test fun `boxed but no hand-drawn expectation contributes no IoU`() {
-        // e.g. an emoji-only expected entry that the model still returned a box for.
-        val expected = listOf(ExpectedCharacterBox("Bear", bounds = null))
-        val result = scoreCharacterBoxes(expected, listOf(ParsedCharacter("Bear", null, box(0f, 0f, 1f, 1f))))
-        assertEquals(1, result.found)
-        assertEquals(1, result.boxed)
-        assertNull(result.meanIou)
-    }
-
-    @Test fun `matched character with both boxes contributes its IoU and mean`() {
-        val expectedBox = box(0f, 0f, 1f, 1f)
-        val actualBox = box(0.5f, 0.5f, 1.5f, 1.5f)
-        val expected = listOf(ExpectedCharacterBox("Bear", expectedBox))
-        val result = scoreCharacterBoxes(expected, listOf(ParsedCharacter("Bear", null, actualBox)))
-
-        assertEquals(1, result.found)
-        assertEquals(1, result.boxed)
-        assertEquals(listOf(iou(actualBox, expectedBox)), result.ious)
-        assertEquals(0.25f / 1.75f, result.meanIou!!, 0.0001f)
-    }
-
-    @Test fun `mean IoU averages across multiple scored characters`() {
-        val expected = listOf(
-            ExpectedCharacterBox("Bear", box(0f, 0f, 1f, 1f)),
-            ExpectedCharacterBox("Wolf", box(0f, 0f, 1f, 1f)),
-        )
-        val actual = listOf(
-            ParsedCharacter("Bear", null, box(0f, 0f, 1f, 1f)), // perfect match, IoU 1
-            ParsedCharacter("Wolf", null, box(0f, 0f, 0f, 0f)), // degenerate, IoU 0
-        )
-        val result = scoreCharacterBoxes(expected, actual)
-
-        assertEquals(2, result.found)
-        assertEquals(2, result.boxed)
-        assertEquals(0.5f, result.meanIou!!, 0.0001f)
     }
 
     @Test fun `scores a bubble box against its hand-drawn box`() {

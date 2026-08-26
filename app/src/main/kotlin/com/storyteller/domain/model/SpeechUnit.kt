@@ -21,13 +21,10 @@ const val NARRATOR = "Narrator"
 
 /**
  * Whatever the model returns for the narrator ("Narrator", "narrator", padded
- * with whitespace...) must be treated as the narrator everywhere a speaker or
- * character name is compared against [NARRATOR] - trimmed and case-folded, the
- * same rule at every comparison site. A single site normalizing to the exact
- * [NARRATOR] spelling is not enough on its own: [SpeechUnit.speaker] is sourced
- * independently of [ParsedCharacter.name] (see [toSpeechUnits]), so a
- * comparison against the literal constant can pass for one and silently fail
- * for the other.
+ * with whitespace...) must be treated as the narrator everywhere a speaker
+ * name is compared against [NARRATOR] - trimmed and case-folded, the same
+ * rule at every comparison site, rather than relying on [toSpeechUnits] alone
+ * to normalize the spelling once and for all call sites.
  */
 fun isNarrator(name: String): Boolean = name.trim().equals(NARRATOR, ignoreCase = true)
 
@@ -49,16 +46,5 @@ fun List<ParsedUnit>.toSpeechUnits(): List<SpeechUnit> =
             )
         }
 
-/** A character on the page, with whatever identity the model could supply. */
-data class ParsedCharacter(
-    val name: String,
-    val emoji: String?,
-    /** The character AS DRAWN — not the speech bubble. Normalized 0..1. */
-    val bounds: BoundingBox?,
-)
-
-/** One page's parse: what is said, and who is on the page. */
-data class ParsedPage(
-    val units: List<SpeechUnit>,
-    val characters: List<ParsedCharacter>,
-)
+/** One page's parse: what is said, in reading order. */
+data class ParsedPage(val units: List<SpeechUnit>)

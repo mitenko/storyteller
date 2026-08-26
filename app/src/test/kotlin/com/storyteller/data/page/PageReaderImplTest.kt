@@ -5,6 +5,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.storyteller.data.local.StorytellerDatabase
 import com.storyteller.domain.model.PageImage
+import com.storyteller.domain.pageImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
@@ -78,7 +79,7 @@ class PageReaderImplTest {
      * Enqueues a well-formed structured-outputs response carrying [payload] verbatim
      * as the text block, with no wrapping. Unlike [okResponse] (which always wraps
      * its argument as the value of a top-level "units" key), this lets a caller
-     * control the full top-level JSON object, e.g. to also carry "characters".
+     * control the full top-level JSON object verbatim.
      */
     private fun enqueueTextBlock(payload: String) {
         val body = buildJsonObject {
@@ -223,49 +224,20 @@ class PageReaderImplTest {
         assertNull(hit[0].bounds)
     }
 
-    @Test fun `parses page-level characters alongside units`() = runTest {
-        enqueueTextBlock(
-            """
-            {"units":[{"speaker":"Bear","text":"Hello","bounds":null}],
-             "characters":[{"name":"Bear","emoji":"🐻",
-                            "bounds":{"left":0.1,"top":0.1,"right":0.3,"bottom":0.4}}]}
-            """.trimIndent(),
-        )
+    @Test fun `does not ask the model for characters`() {
+        val schema = PAGE_SCHEMA.toString()
 
-        val page = reader().read(image(1, 2, 3)).getOrThrow()
-
-        assertEquals(1, page.units.size)
-        assertEquals("Bear", page.characters.single().name)
-        assertEquals("🐻", page.characters.single().emoji)
-        assertEquals(0.3f, page.characters.single().bounds!!.right, 0.001f)
+        assertFalse("characters should no longer be requested", schema.contains("characters"))
+        assertFalse("emoji should no longer be requested", schema.contains("emoji"))
     }
 
-    /**
-     * F3: SpeechUnit.speaker is trimmed (`p.speaker.trim().ifBlank { NARRATOR }`
-     * in toSpeechUnits), but ParsedCharacter.name previously was not - so " Bear "
-     * from the model produced a badge map key that could never match a unit
-     * whose speaker came back trimmed to "Bear", silently losing the badge past
-     * the emoji straight to None. Trimming here, in the one place ParsedCharacter
-     * is built, is what keeps the two keys in agreement.
-     */
-    @Test fun `trims a character name so it matches the trimmed speaker key`() = runTest {
-        enqueueTextBlock(
-            """{"units":[{"speaker":"Bear","text":"Hello","bounds":null}],
-               "characters":[{"name":" Bear ","emoji":"🐻","bounds":null}]}""",
-        )
+    @Test fun `parses a page of units`() = runTest {
+        enqueueTextBlock("""{"units":[{"speaker":"Bear","text":"Hello","bounds":null}]}""")
 
-        val page = reader().read(image(1, 2, 3)).getOrThrow()
-
-        assertEquals("Bear", page.characters.single().name)
-    }
-
-    @Test fun `tolerates a page with no characters array entries`() = runTest {
-        enqueueTextBlock("""{"units":[{"speaker":"Narrator","text":"Once","bounds":null}],"characters":[]}""")
-
-        val page = reader().read(image(1, 2, 3)).getOrThrow()
+        val page = reader().read(pageImage()).getOrThrow()
 
         assertEquals(1, page.units.size)
-        assertTrue(page.characters.isEmpty())
+        assertEquals("Bear", page.units.single().speaker)
     }
 
     @Test fun `http error is a failure and is not cached`() = runTest {

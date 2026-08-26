@@ -5,7 +5,6 @@ import com.storyteller.data.local.ParsedPageEntity
 import com.storyteller.data.page.ClaudeApi
 import com.storyteller.data.page.PageReaderImpl
 import com.storyteller.domain.model.BoundingBox
-import com.storyteller.domain.model.ParsedCharacter
 import com.storyteller.domain.model.SpeechUnit
 import com.storyteller.ui.capture.downscaleToPageImage
 import kotlinx.coroutines.runBlocking
@@ -27,14 +26,6 @@ import java.io.File
 
 @Serializable
 private data class ExpectedBox(val left: Float, val top: Float, val right: Float, val bottom: Float)
-
-/**
- * `bounds` is optional: a prose picture book's expected character carries
- * only a name (and maybe `emojiExpected`) because there is no crop to
- * hand-draw a box against — see evals/expected/README.md.
- */
-@Serializable
-private data class ExpectedCharacter(val name: String, val emojiExpected: Boolean = false, val bounds: ExpectedBox? = null)
 
 /**
  * [BoundingBox] lives in `domain` and isn't itself `@Serializable` (production
@@ -64,23 +55,8 @@ internal data class ExpectedBubble(val index: Int, @Serializable(with = Bounding
 private data class Expected(
     val speakers: List<String>,
     val minUnits: Int,
-    val characters: List<ExpectedCharacter> = emptyList(),
     val bubbles: List<ExpectedBubble> = emptyList(),
 )
-
-/** Pure input to [scoreCharacterBoxes] — decoupled from the JSON DTO so the scorer is testable without Robolectric. */
-internal data class ExpectedCharacterBox(val name: String, val bounds: BoundingBox?)
-
-/**
- * Result of matching one fixture's expected characters against what the model
- * actually returned. [found] counts expected characters that came back under
- * the same name at all (boxed or not); [boxed] counts how many of those also
- * carried a returned box; [ious] holds one IoU per character where BOTH a
- * hand-drawn box and a returned box existed to compare.
- */
-internal data class CharacterBoxScore(val expected: Int, val found: Int, val boxed: Int, val ious: List<Float>) {
-    val meanIou: Float? get() = if (ious.isEmpty()) null else ious.average().toFloat()
-}
 
 /**
  * Intersection-over-union against a hand-drawn box. 0.5 is the usual
@@ -98,29 +74,6 @@ internal fun iou(a: BoundingBox, b: BoundingBox): Float {
     val areaB = (b.right - b.left) * (b.bottom - b.top)
     val union = areaA + areaB - inter
     return if (union <= 0f) 0f else inter / union
-}
-
-/**
- * Matches by name (trimmed, case-insensitive) rather than position, because
- * the model's character list is not guaranteed to come back in the same
- * order as the expected list was authored in.
- */
-internal fun scoreCharacterBoxes(expected: List<ExpectedCharacterBox>, actual: List<ParsedCharacter>): CharacterBoxScore {
-    if (expected.isEmpty()) return CharacterBoxScore(expected = 0, found = 0, boxed = 0, ious = emptyList())
-
-    val byName = actual.associateBy { it.name.trim().lowercase() }
-    var found = 0
-    var boxed = 0
-    val ious = mutableListOf<Float>()
-    for (exp in expected) {
-        val match = byName[exp.name.trim().lowercase()] ?: continue
-        found++
-        val actualBounds = match.bounds ?: continue
-        boxed++
-        val expectedBounds = exp.bounds ?: continue
-        ious += iou(actualBounds, expectedBounds)
-    }
-    return CharacterBoxScore(expected = expected.size, found = found, boxed = boxed, ious = ious)
 }
 
 internal data class BubbleScore(val expected: Int, val boxed: Int, val meanIou: Float)
@@ -154,8 +107,7 @@ internal fun scoreBubbleBoxes(units: List<SpeechUnit>, expected: List<ExpectedBu
  * `@Test` body, which never runs in CI (it is `assumeTrue`-gated).
  *
  * Fixtures with no `bubbles` block at all ([BubbleScore.expected] == 0) are
- * excluded — they contributed nothing to score, the same way [scoreCharacterBoxes]
- * treats a fixture with no `characters` block.
+ * excluded — they contributed nothing to score.
  *
  * [meanIou] is a **boxed-count-weighted** mean, not an unweighted average of
  * the per-fixture means: each fixture's [BubbleScore.meanIou] is itself an
@@ -287,7 +239,6 @@ class VisionEval {
         val reader = PageReaderImpl(api, noCache, json)
 
         val rows = mutableListOf<EvalRow>()
-        val allCharacterIous = mutableListOf<Float>()
         val allBubbleScores = mutableListOf<BubbleScore>()
         val report = StringBuilder("\n=== Vision eval ===\n")
 
@@ -316,12 +267,6 @@ class VisionEval {
             val passed = speakersOk && countOk
             rows += EvalRow(if (passed) RowOutcome.PASS else RowOutcome.FAIL, boxed = boxed > 0)
 
-            val expectedCharBoxes = expected.characters.map {
-                ExpectedCharacterBox(name = it.name, bounds = it.bounds?.let { b -> BoundingBox(b.left, b.top, b.right, b.bottom) })
-            }
-            val charScore = scoreCharacterBoxes(expectedCharBoxes, page.characters)
-            allCharacterIous += charScore.ious
-
             val bubbleScore = scoreBubbleBoxes(units, expected.bubbles)
             allBubbleScores += bubbleScore
 
@@ -331,12 +276,6 @@ class VisionEval {
                 .append(", speakers=").append(speakers)
                 .append(" expected=").append(expected.speakers.sorted())
                 .append(", boxed=").append(boxed).append("/").append(units.size)
-            if (charScore.expected > 0) {
-                val iouStr = charScore.meanIou?.let { "%.3f".format(it) } ?: "n/a"
-                report.append(", characters=").append(charScore.found).append("/").append(charScore.expected)
-                    .append(" found, ").append(charScore.boxed).append("/").append(charScore.found)
-                    .append(" boxed, meanIoU=").append(iouStr)
-            }
             if (bubbleScore.expected > 0) {
                 report.append(", bubbles=").append(bubbleScore.boxed).append("/").append(bubbleScore.expected)
                     .append(" boxed, meanIoU=").append("%.3f".format(bubbleScore.meanIou))
@@ -345,27 +284,14 @@ class VisionEval {
         }
 
         report.append(tally(rows).summaryLine())
-        if (allCharacterIous.isNotEmpty()) {
-            report.append(
-                ("--- character box mean IoU across %d scored character(s): %.3f " +
-                    "(stop and report rather than proceed if below 0.50 - see evals/README.md) ---\n")
-                    .format(allCharacterIous.size, allCharacterIous.average()),
-            )
-        } else {
-            report.append(
-                "--- no character box comparisons available: no expected/*.json in this run supplied " +
-                    "both a hand-drawn box and a character the model actually returned ---\n",
-            )
-        }
 
         val bubbleAggregate = aggregateBubbleScores(allBubbleScores)
         if (bubbleAggregate.expected > 0) {
-            // totalBoxed/totalExpected are printed right alongside the mean -
-            // exactly like the character-box aggregate above - so a model that
-            // abstains from drawing boxes shows up as a small boxed count against
-            // a larger expected count, not as a flattered mean. See
-            // [aggregateBubbleScores] for why this is a weighted mean, not an
-            // average of the per-fixture means.
+            // totalBoxed/totalExpected are printed right alongside the mean so
+            // a model that abstains from drawing boxes shows up as a small
+            // boxed count against a larger expected count, not as a flattered
+            // mean. See [aggregateBubbleScores] for why this is a weighted
+            // mean, not an average of the per-fixture means.
             report.append(
                 ("--- bubble box mean IoU across %d/%d expected bubble(s) boxed: %.3f " +
                     "(stop and report rather than proceed if below 0.50 - see evals/README.md) ---\n")
