@@ -13,19 +13,30 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.storyteller.domain.model.Badge
 
-/** Fixed size so rows align whether or not a badge is present. */
+internal const val BADGE_TAG = "badge"
+
 private val BADGE_SIZE = 40.dp
 
 /**
- * Occupies its slot even when blank: collapsing it would indent narrator lines
- * differently from character lines and the list would read as ragged.
+ * Renders NOTHING for [Badge.None], occupying no space at all.
+ *
+ * This reverses the original design, which reserved a blank slot so every row
+ * shared one indent. Narration and an unidentifiable speaker both resolve to the
+ * narrator, and the narrator never gets a badge - so full-width narration against
+ * indented dialogue distinguishes the two visually, instead of asking a child to
+ * read an empty square. Callers must therefore omit the trailing spacer too.
  */
 @Composable
 internal fun BadgeIcon(badge: Badge) {
-    Box(Modifier.size(BADGE_SIZE).clip(CircleShape), contentAlignment = Alignment.Center) {
+    if (badge == Badge.None) return
+    Box(
+        Modifier.size(BADGE_SIZE).clip(CircleShape).testTag(BADGE_TAG),
+        contentAlignment = Alignment.Center,
+    ) {
         when (badge) {
             is Badge.Emoji -> Text(badge.value)
             is Badge.Image -> {
@@ -41,7 +52,7 @@ internal fun BadgeIcon(badge: Badge) {
                     )
                 }
             }
-            Badge.None -> Unit
+            Badge.None -> Unit // unreachable: handled by the early return above
         }
     }
 }

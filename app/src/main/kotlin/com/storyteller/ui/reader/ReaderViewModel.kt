@@ -86,6 +86,16 @@ class ReaderViewModel @Inject constructor(
             player.state.collect { state ->
                 playback = state
                 if (state == PlaybackState.Finished) playingIndex = null
+
+                // Auto is the ONLY mode that may trust the player's position. It
+                // builds one playlist per page in reading order from unit 0, so
+                // position N is unit N. Tap plays a one-item playlist and always
+                // reports position 0, so taking it here would move the highlight
+                // to line 0 on every tap - onLineTapped already recorded the real
+                // index and must win.
+                if (mode == ReadingMode.Auto && state is PlaybackState.Playing) {
+                    playingIndex = state.playlistIndex
+                }
                 // Only Playing carries it; the other branches are pipeline-driven
                 // and would be overwritten by the next pipeline emission anyway.
                 (_uiState.value as? ReaderUiState.Playing)?.let {

@@ -22,11 +22,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.storyteller.domain.model.Badge
 import com.storyteller.domain.model.PlaybackState
 import com.storyteller.domain.model.ReadingMode
 
@@ -69,6 +71,8 @@ fun ReaderContent(
             }
 
             is ReaderUiState.Playing -> {
+                CurrentSpeakerHeader(state.lines.firstOrNull { it.index == state.playingIndex })
+
                 LazyColumn(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -108,6 +112,32 @@ fun ReaderContent(
     }
 }
 
+internal const val HEADER_TAG = "current-speaker"
+
+/**
+ * Who is speaking right now, above the list. [line] is null when nothing is
+ * sounding, and then nothing renders.
+ *
+ * The narrator keeps the header and merely loses the badge, rather than hiding it
+ * altogether: narration is a real answer to "who is talking now", and hiding the
+ * header would make it flicker in and out on every alternation between narration
+ * and dialogue - which on a graphic-novel page can be every other line.
+ */
+@Composable
+internal fun CurrentSpeakerHeader(line: ReaderUiState.Line?) {
+    if (line == null) return
+    Row(
+        Modifier.fillMaxWidth().testTag(HEADER_TAG),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (line.badge != Badge.None) {
+            BadgeIcon(line.badge)
+            Spacer(Modifier.width(12.dp))
+        }
+        Text(line.speaker, style = MaterialTheme.typography.titleMedium)
+    }
+}
+
 @Composable
 private fun Centered(content: @Composable () -> Unit) {
     Column(
@@ -141,8 +171,12 @@ internal fun LineRow(line: ReaderUiState.Line, isPlaying: Boolean, onTap: (Int) 
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        BadgeIcon(line.badge)
-        Spacer(Modifier.width(12.dp))
+        // Omitted entirely for the narrator, spacer included, so narration runs
+        // to the margin while dialogue sits indented under its speaker.
+        if (line.badge != Badge.None) {
+            BadgeIcon(line.badge)
+            Spacer(Modifier.width(12.dp))
+        }
         Column(Modifier.alpha(if (line.audioReady) 1f else 0.4f)) {
             Text(line.speaker, style = MaterialTheme.typography.labelMedium)
             Text(line.text, style = MaterialTheme.typography.bodyLarge)

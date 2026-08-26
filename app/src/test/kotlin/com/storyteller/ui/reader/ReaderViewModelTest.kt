@@ -335,9 +335,9 @@ class ReaderViewModelTest {
         runCurrent()
         assertEquals(PlaybackState.Idle, (vm.uiState.value as ReaderUiState.Playing).playback)
 
-        player.state.value = PlaybackState.Playing
+        player.state.value = PlaybackState.Playing(0)
         runCurrent()
-        assertEquals(PlaybackState.Playing, (vm.uiState.value as ReaderUiState.Playing).playback)
+        assertEquals(PlaybackState.Playing(0), (vm.uiState.value as ReaderUiState.Playing).playback)
 
         player.state.value = PlaybackState.Finished
         runCurrent()
@@ -442,6 +442,37 @@ class ReaderViewModelTest {
         advanceUntilIdle()
 
         assertEquals(1, player.played.size)
+    }
+
+    @Test fun `auto mode follows the player's playlist index`() = runTest {
+        val player = RecordingPlayer()
+        val vm = readerViewModel(player, mode = ReadingMode.Auto)
+        pipeline.emit(PipelineState.Ready(preparedUnits(3), emptyMap()))
+        advanceUntilIdle()
+
+        // Auto builds one playlist per page in reading order from unit 0, so the
+        // player's position IS the unit index there.
+        player.state.value = PlaybackState.Playing(2)
+        advanceUntilIdle()
+
+        assertEquals(2, (vm.uiState.value as ReaderUiState.Playing).playingIndex)
+    }
+
+    @Test fun `tap mode ignores the player's playlist index`() = runTest {
+        val player = RecordingPlayer()
+        val vm = readerViewModel(player, mode = ReadingMode.Tap)
+        pipeline.emit(PipelineState.Ready(preparedUnits(3), emptyMap()))
+        advanceUntilIdle()
+
+        vm.onLineTapped(2)
+        advanceUntilIdle()
+
+        // Tap plays a ONE-ITEM playlist, so the player always reports position 0.
+        // Trusting it here would highlight line 0 for every tap.
+        player.state.value = PlaybackState.Playing(0)
+        advanceUntilIdle()
+
+        assertEquals(2, (vm.uiState.value as ReaderUiState.Playing).playingIndex)
     }
 
     @Test fun `tapping a line plays exactly that unit`() = runTest {
