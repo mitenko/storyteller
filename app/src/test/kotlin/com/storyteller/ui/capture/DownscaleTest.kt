@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import java.io.ByteArrayOutputStream
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -66,5 +67,26 @@ class DownscaleTest {
     @Test fun `output is smaller than the input for an oversized photo`() {
         val input = jpeg(4000, 3000)
         assertTrue(downscaleToPageImage(input).bytes.size < input.size)
+    }
+
+    @Test fun `keeps the original bytes for display while downscaling for upload`() {
+        val original = jpeg(4000, 3000)
+
+        val page = downscaleToPageImage(original)
+
+        val (uploadW, _) = sizeOf(page.bytes)
+        val (displayW, _) = sizeOf(page.displayBytes)
+        assertEquals(1568, uploadW)
+        assertEquals(4000, displayW)
+    }
+
+    @Test fun `a small capture shares one array rather than copying it`() {
+        val original = jpeg(800, 600)
+
+        val page = downscaleToPageImage(original)
+
+        // Nothing was downscaled, so display and upload are the same pixels;
+        // holding two copies of an identical array would waste memory for nothing.
+        assertSame(page.bytes, page.displayBytes)
     }
 }

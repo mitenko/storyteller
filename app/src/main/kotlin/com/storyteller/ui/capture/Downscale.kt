@@ -58,7 +58,11 @@ fun downscaleToPageImage(
     if (upright !== scaled) upright.recycle()
     if (scaled !== decoded) scaled.recycle()
     decoded.recycle()
-    return PageImage(out.toByteArray(), "image/jpeg")
+    val encoded = out.toByteArray()
+    // If nothing was actually downscaled (only rotated), the rotated output IS the
+    // display copy — the raw sensor JPEG is sideways and must never reach the reader.
+    val displayBytes = if (scaled === decoded) encoded else jpeg
+    return PageImage(encoded, "image/jpeg", displayBytes = displayBytes)
 }
 
 private fun requireNonNull(bitmap: Bitmap?): Bitmap =
