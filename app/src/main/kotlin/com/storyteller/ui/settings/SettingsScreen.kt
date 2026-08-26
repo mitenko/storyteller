@@ -1,6 +1,5 @@
 package com.storyteller.ui.settings
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -9,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -75,23 +75,30 @@ internal fun SettingsFrame(onBack: () -> Unit, content: @Composable ColumnScope.
 
 /**
  * Stateless so it can be tested without Hilt, matching how the capture screen's
- * halves are tested. The whole row is clickable, not just the switch, so a tap on
- * the label also toggles the mode.
+ * halves are tested. The whole row is toggleable, not just the switch, so a tap
+ * on the label also toggles the mode - matching [ThemeRow]'s pattern of putting
+ * real toggle-state semantics on the Row via [toggleable] with `onCheckedChange
+ * = null` on the control itself, rather than a bare `clickable` row plus a
+ * separately-live `Switch`. The latter left TalkBack seeing an unlabelled
+ * clickable row and a second, independently-actionable switch for the same
+ * state.
  */
 @Composable
 internal fun ReadingModeRow(mode: ReadingMode, onChange: (ReadingMode) -> Unit) {
+    val tap = mode == ReadingMode.Tap
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable { onChange(if (mode == ReadingMode.Auto) ReadingMode.Tap else ReadingMode.Auto) },
+            .toggleable(
+                value = tap,
+                role = Role.Switch,
+                onValueChange = { onChange(if (it) ReadingMode.Tap else ReadingMode.Auto) },
+            ),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("Tap each line to hear it", style = MaterialTheme.typography.bodyLarge)
-        Switch(
-            checked = mode == ReadingMode.Tap,
-            onCheckedChange = { onChange(if (it) ReadingMode.Tap else ReadingMode.Auto) },
-        )
+        Switch(checked = tap, onCheckedChange = null)
     }
 }
 
