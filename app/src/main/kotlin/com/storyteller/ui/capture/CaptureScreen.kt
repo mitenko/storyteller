@@ -245,8 +245,8 @@ internal fun CapturedPage(
             Modifier.fillMaxWidth().align(Alignment.BottomCenter).padding(24.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
         ) {
-            OutlinedButton(onClick = onRetake) { Text("Retake") }
-            Button(onClick = onConfirm) { Text("Read this page") }
+            OutlinedButton(onClick = onRetake) { Icon(painter = painterResource(R.drawable.ic_refresh), contentDescription = "Retake") }
+            Button(onClick = onConfirm) { Icon(painter = painterResource(R.drawable.ic_play_arrow), contentDescription = "Read this page") }
         }
     }
 }
@@ -271,9 +271,9 @@ internal fun PermissionRequest(
         Text("Storyteller needs the camera to read a page.")
         if (permanentlyDenied) {
             Text("Camera access is switched off. Turn it on in Settings to read a page.")
-            Button(onClick = onOpenSettings) { Text("Open settings") }
+            Button(onClick = onOpenSettings) { Icon(painter = painterResource(R.drawable.ic_settings), contentDescription = "Open settings") }
         } else {
-            Button(onClick = onRequest) { Text("Allow camera") }
+            Button(onClick = onRequest) { Icon(painter = painterResource(R.drawable.ic_photo_camera), contentDescription = "Allow camera") }
         }
     }
 }

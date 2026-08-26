@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -27,11 +28,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.storyteller.R
 import com.storyteller.domain.model.Badge
 import com.storyteller.domain.model.PlaybackState
 import com.storyteller.domain.model.ReadingMode
@@ -105,13 +108,13 @@ fun ReaderContent(
                     // than only once Finished, because a child may want to move on to
                     // the next page early. Before this, the successful path had no
                     // control at all - "Take another photo" existed only under Error.
-                    Button(onClick = onBack) { Text("Take another photo") }
+                    Button(onClick = onBack) { Icon(painter = painterResource(R.drawable.ic_photo_camera), contentDescription = "Take another photo") }
                 }
 
                 is ReaderUiState.Error -> Centered {
                     Text(state.message, style = MaterialTheme.typography.bodyLarge)
-                    if (state.canRetry) Button(onClick = onRetry) { Text("Try again") }
-                    Button(onClick = onBack) { Text("Take another photo") }
+                    if (state.canRetry) Button(onClick = onRetry) { Icon(painter = painterResource(R.drawable.ic_refresh), contentDescription = "Try again") }
+                    Button(onClick = onBack) { Icon(painter = painterResource(R.drawable.ic_photo_camera), contentDescription = "Take another photo") }
                 }
             }
         }

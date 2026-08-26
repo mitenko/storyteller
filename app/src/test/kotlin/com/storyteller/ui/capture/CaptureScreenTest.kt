@@ -33,8 +33,8 @@ class CaptureScreenTest {
         compose.setContent { CapturedPage(pageImage(), onRetake = {}, onConfirm = {}) }
 
         compose.onNodeWithContentDescription("The page you just photographed").assertIsDisplayed()
-        compose.onNodeWithText("Retake").assertIsDisplayed()
-        compose.onNodeWithText("Read this page").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Retake").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Read this page").assertIsDisplayed()
     }
 
     @Test fun `review buttons report retake and confirm separately`() {
@@ -44,8 +44,8 @@ class CaptureScreenTest {
             CapturedPage(pageImage(), onRetake = { retakes++ }, onConfirm = { confirms++ })
         }
 
-        compose.onNodeWithText("Retake").performClick()
-        compose.onNodeWithText("Read this page").performClick()
+        compose.onNodeWithContentDescription("Retake").performClick()
+        compose.onNodeWithContentDescription("Read this page").performClick()
 
         assertEquals(1, retakes)
         assertEquals(1, confirms)
@@ -70,7 +70,7 @@ class CaptureScreenTest {
             )
         }
 
-        compose.onNodeWithText("Allow camera").performClick()
+        compose.onNodeWithContentDescription("Allow camera").performClick()
         assertEquals(1, requests)
     }
 
@@ -86,8 +86,8 @@ class CaptureScreenTest {
 
         // Re-requesting is a no-op once Android has stopped showing the dialog, so
         // the button that would do it must not be the only way out.
-        compose.onNodeWithText("Allow camera").assertDoesNotExist()
-        compose.onNodeWithText("Open settings").performClick()
+        compose.onNodeWithContentDescription("Allow camera").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Open settings").performClick()
         assertEquals(1, settings)
     }
 

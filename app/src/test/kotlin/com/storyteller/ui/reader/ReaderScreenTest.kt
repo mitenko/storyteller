@@ -8,6 +8,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertWidthIsEqualTo
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
@@ -134,7 +135,7 @@ class ReaderScreenTest {
             )
         }
 
-        compose.onNodeWithText("Take another photo").performClick()
+        compose.onNodeWithContentDescription("Take another photo").performClick()
         assertEquals(1, backs)
     }
 
@@ -197,7 +198,7 @@ class ReaderScreenTest {
                 onBack = {},
             )
         }
-        compose.onNodeWithText("Try again").performClick()
+        compose.onNodeWithContentDescription("Try again").performClick()
         assertEquals(1, retries)
     }
 
@@ -205,7 +206,7 @@ class ReaderScreenTest {
         compose.setContent {
             ReaderContent(ReaderUiState.Error("Nope.", canRetry = false), onRetry = {}, onBack = {})
         }
-        compose.onNodeWithText("Take another photo").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Take another photo").assertIsDisplayed()
     }
 
     /**
