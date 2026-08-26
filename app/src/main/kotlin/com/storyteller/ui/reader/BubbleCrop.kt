@@ -25,9 +25,10 @@ private const val BUBBLE_PAD = 0.04f
  */
 fun cropBubble(image: PageImage, bounds: BoundingBox?): Bitmap? {
     if (bounds == null) return null
-    val full = BitmapFactory.decodeByteArray(image.displayBytes, 0, image.displayBytes.size)
-        ?: return null
+    var full: Bitmap? = null
     return try {
+        full = BitmapFactory.decodeByteArray(image.displayBytes, 0, image.displayBytes.size)
+            ?: return null
         val rect = cropRect(bounds, full.width, full.height, padFraction = BUBBLE_PAD)
             ?: return null
         val cropped = Bitmap.createBitmap(full, rect.left, rect.top, rect.width, rect.height)
@@ -39,6 +40,11 @@ fun cropBubble(image: PageImage, bounds: BoundingBox?): Bitmap? {
         Log.w(TAG, "could not crop a bubble; the reader will show its text", e)
         null
     } finally {
-        full.recycle()
+        // Decoding a full-resolution page is the single largest allocation in this
+        // function, so it runs inside this try/finally too: an OutOfMemoryError
+        // there must recycle whatever got allocated and still return null, the
+        // same as a failure further down. full stays null on the never-decoded
+        // path (bad bytes, or OOM before assignment), so recycle null-safely.
+        full?.recycle()
     }
 }
