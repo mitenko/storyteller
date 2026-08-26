@@ -4,6 +4,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertHeightIsEqualTo
+import androidx.compose.ui.test.assertWidthIsEqualTo
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -41,6 +44,14 @@ class ReaderScreenTest {
         }
 
         compose.onNodeWithTag(BADGE_TAG, useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test fun `the badge is rendered at its full size`() {
+        compose.setContent { BadgeIcon(Badge.Emoji("B")) }
+
+        compose.onNodeWithTag(BADGE_TAG, useUnmergedTree = true)
+            .assertWidthIsEqualTo(60.dp)
+            .assertHeightIsEqualTo(60.dp)
     }
 
     @Test fun `a character line keeps its badge column`() {

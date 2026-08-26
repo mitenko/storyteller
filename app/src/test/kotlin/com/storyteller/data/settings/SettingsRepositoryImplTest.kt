@@ -28,8 +28,8 @@ class SettingsRepositoryImplTest {
 
     @After fun close() = db.close()
 
-    @Test fun `defaults to auto when nothing has been stored`() = runTest {
-        assertEquals(ReadingMode.Auto, repo.mode.first())
+    @Test fun `defaults to tap when nothing has been stored`() = runTest {
+        assertEquals(ReadingMode.Tap, repo.mode.first())
     }
 
     @Test fun `round-trips a stored mode`() = runTest {
@@ -37,9 +37,9 @@ class SettingsRepositoryImplTest {
         assertEquals(ReadingMode.Tap, repo.mode.first())
     }
 
-    @Test fun `an unrecognised stored value falls back to auto`() = runTest {
+    @Test fun `an unrecognised stored value falls back to tap`() = runTest {
         db.settingsDao().put(com.storyteller.data.local.SettingEntity("reading_mode", "sideways"))
-        assertEquals(ReadingMode.Auto, repo.mode.first())
+        assertEquals(ReadingMode.Tap, repo.mode.first())
     }
 
     @Test fun `defaults to dark when no theme has been stored`() = runTest {
@@ -78,13 +78,13 @@ class SettingsRepositoryImplTest {
      * ReaderViewModel's `.catch { emit(Auto) }.first()` - only see a safe
      * default if the repository itself degrades a throwing read to Auto.
      */
-    @Test fun `a throwing read defaults to Auto rather than propagating`() = runTest {
+    @Test fun `a throwing read defaults to Tap rather than propagating`() = runTest {
         val throwing = object : SettingsDao {
             override fun observe(key: String): Flow<SettingEntity?> = flow { throw RuntimeException("disk fault") }
             override suspend fun put(entity: SettingEntity) = throw RuntimeException("disk fault")
         }
         val faultyRepo = SettingsRepositoryImpl(throwing)
 
-        assertEquals(ReadingMode.Auto, faultyRepo.mode.first())
+        assertEquals(ReadingMode.Tap, faultyRepo.mode.first())
     }
 }

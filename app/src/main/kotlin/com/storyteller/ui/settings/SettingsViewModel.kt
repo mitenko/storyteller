@@ -22,7 +22,7 @@ class SettingsViewModel @Inject constructor(
 ) : ViewModel() {
 
     val mode: StateFlow<ReadingMode> =
-        settings.mode.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ReadingMode.Auto)
+        settings.mode.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ReadingMode.Tap)
 
     /**
      * A Room write fault (disk full, corrupt database - see

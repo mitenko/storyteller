@@ -47,7 +47,7 @@ class ReaderViewModel @Inject constructor(
     private var playback: PlaybackState = PlaybackState.Idle
 
     /** Auto reads the page through; Tap plays nothing until a line is tapped. */
-    private var mode = ReadingMode.Auto
+    private var mode = ReadingMode.Tap
 
     /** The row currently sounding in Tap mode, or null. Cleared on a fresh page and on Finished. */
     private var playingIndex: Int? = null
@@ -72,7 +72,7 @@ class ReaderViewModel @Inject constructor(
             // settings.mode would kill this whole coroutine before pipeline.state
             // is ever collected, leaving the reader stuck on ReadingPage with no
             // error screen - a settings fault must never stop a page being read.
-            mode = settings.mode.catch { emit(ReadingMode.Auto) }.first()
+            mode = settings.mode.catch { emit(ReadingMode.Tap) }.first()
             // Guarded the same way as the .first() above: this launch is a
             // non-supervisor child of the coroutine that runs
             // pipeline.state.collect directly (not in its own launch), so an

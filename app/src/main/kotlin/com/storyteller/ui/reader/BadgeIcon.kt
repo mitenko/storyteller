@@ -19,7 +19,8 @@ import com.storyteller.domain.model.Badge
 
 internal const val BADGE_TAG = "badge"
 
-private val BADGE_SIZE = 40.dp
+/** 60dp, up from 40: at 40 a cropped face was too small for a child to recognise. */
+private val BADGE_SIZE = 60.dp
 
 /**
  * Renders NOTHING for [Badge.None], occupying no space at all.

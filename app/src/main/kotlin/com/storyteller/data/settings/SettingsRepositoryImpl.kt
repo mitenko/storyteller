@@ -15,17 +15,19 @@ private const val KEY_THEME = "theme"
 class SettingsRepositoryImpl(private val dao: SettingsDao) : SettingsRepository {
 
     /**
-     * Anything unreadable reads as Auto - spec ยง10: "Settings read fails ->
-     * Default to Auto". The `map` alone only covers a null row (nothing stored
+     * Anything unreadable reads as Tap, which is the app's default: speech
+     * happens only when a line is tapped unless the reader has chosen otherwise.
+     * Tap is also the safer fault value - a settings fault that silently fell
+     * back to Auto would start reading a page aloud to someone who had chosen
+     * not to have that happen. The `map` alone only covers a null row (nothing stored
      * yet); `.catch` covers the DAO's Flow throwing outright (disk fault,
      * corrupt database), which is the other half of "unreadable" and, before
      * this, was not handled anywhere on this path. A settings fault must never
-     * stop a page being read, and Auto is iteration 1's behaviour, so it is the
-     * safe default either way.
+     * stop a page being read; Tap merely waits for a tap.
      */
     override val mode: Flow<ReadingMode> = dao.observe(KEY_MODE)
-        .map { row -> ReadingMode.entries.firstOrNull { it.name == row?.value } ?: ReadingMode.Auto }
-        .catch { emit(ReadingMode.Auto) }
+        .map { row -> ReadingMode.entries.firstOrNull { it.name == row?.value } ?: ReadingMode.Tap }
+        .catch { emit(ReadingMode.Tap) }
 
     override suspend fun setMode(mode: ReadingMode) = dao.put(SettingEntity(KEY_MODE, mode.name))
 
