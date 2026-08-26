@@ -1,4 +1,4 @@
-package com.storyteller.data.badge
+package com.storyteller.domain.geometry
 
 import com.storyteller.domain.model.BoundingBox
 import kotlin.math.roundToInt
