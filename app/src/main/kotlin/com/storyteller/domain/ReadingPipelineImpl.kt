@@ -77,8 +77,8 @@ class ReadingPipelineImpl(
             job = scope.launch {
                 guarded(myEpoch) {
                     if (cached != null) {
-                        setState(myEpoch, PipelineState.Preparing(cached, emptyList()))
-                        prepareAll(cached, myEpoch)
+                        setState(myEpoch, PipelineState.Preparing(cached, emptyList(), image))
+                        prepareAll(cached, myEpoch, image)
                     } else {
                         run(image, myEpoch)
                     }
@@ -148,11 +148,11 @@ class ReadingPipelineImpl(
                 parsed = units
             }
         }
-        setState(myEpoch, PipelineState.Preparing(units, emptyList()))
-        prepareAll(units, myEpoch)
+        setState(myEpoch, PipelineState.Preparing(units, emptyList(), image))
+        prepareAll(units, myEpoch, image)
     }
 
-    private suspend fun prepareAll(units: List<SpeechUnit>, myEpoch: Long) = coroutineScope {
+    private suspend fun prepareAll(units: List<SpeechUnit>, myEpoch: Long, image: PageImage) = coroutineScope {
         val gate = Semaphore(MAX_IN_FLIGHT_SYNTHESES)
         // Launch every unit concurrently, then await in index order. Concurrency
         // without losing reading order.
@@ -169,9 +169,9 @@ class ReadingPipelineImpl(
                 return@coroutineScope
             }
             ready += prepared
-            setState(myEpoch, PipelineState.Preparing(units, ready.toList()))
+            setState(myEpoch, PipelineState.Preparing(units, ready.toList(), image))
         }
-        setState(myEpoch, PipelineState.Ready(ready.toList()))
+        setState(myEpoch, PipelineState.Ready(ready.toList(), image))
     }
 
     /**

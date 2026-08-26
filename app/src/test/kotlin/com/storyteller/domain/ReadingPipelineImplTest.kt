@@ -24,6 +24,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -148,6 +149,27 @@ class ReadingPipelineImplTest {
         val seen = states.filterIsInstance<PipelineState.Preparing>()
         assertTrue("expected at least one Preparing", seen.isNotEmpty())
         seen.forEach { assertEquals(3, it.units.size) }
+    }
+
+    @Test fun `ready carries the page image the units came from`() = runTest {
+        val image = pageImage()
+        val pipeline = pipelineWith(units = 2)
+
+        pipeline.start(image)
+        advanceUntilIdle()
+
+        val ready = states.filterIsInstance<PipelineState.Ready>().last()
+        assertSame(image, ready.image)
+    }
+
+    @Test fun `preparing carries the page image too`() = runTest {
+        val image = pageImage()
+        val pipeline = pipelineWith(units = 3)
+
+        pipeline.start(image)
+        advanceUntilIdle()
+
+        states.filterIsInstance<PipelineState.Preparing>().forEach { assertSame(image, it.image) }
     }
 
     @Test
