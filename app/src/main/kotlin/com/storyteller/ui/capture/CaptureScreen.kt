@@ -246,7 +246,7 @@ internal fun CapturedPage(
             horizontalArrangement = Arrangement.SpaceEvenly,
         ) {
             OutlinedButton(onClick = onRetake) { Icon(painter = painterResource(R.drawable.ic_refresh), contentDescription = "Retake") }
-            Button(onClick = onConfirm) { Icon(painter = painterResource(R.drawable.ic_play_arrow), contentDescription = "Read this page") }
+            Button(onClick = onConfirm) { Icon(painter = painterResource(R.drawable.ic_check), contentDescription = "Read this page") }
         }
     }
 }
