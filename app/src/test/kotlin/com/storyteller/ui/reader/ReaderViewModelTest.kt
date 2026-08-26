@@ -446,7 +446,8 @@ class ReaderViewModelTest {
         pipeline.emit(PipelineState.Ready(preparedUnits(3)))
         advanceUntilIdle()
 
-        vm.onLineTapped(2)
+        vm.onNext(); vm.onNext() // current = 2
+        vm.onBubbleTapped()
         advanceUntilIdle()
 
         // Tap plays a ONE-ITEM playlist, so the player always reports position 0.
@@ -457,13 +458,14 @@ class ReaderViewModelTest {
         assertEquals(2, (vm.uiState.value as ReaderUiState.Playing).playingIndex)
     }
 
-    @Test fun `tapping a line plays exactly that unit`() = runTest {
+    @Test fun `tapping the bubble calls endOfPage and marks the tapped unit as playing`() = runTest {
         val player = RecordingPlayer()
         val vm = readerViewModel(player, mode = ReadingMode.Tap)
         pipeline.emit(PipelineState.Ready(preparedUnits(3)))
         advanceUntilIdle()
 
-        vm.onLineTapped(1)
+        vm.onNext() // current = 1
+        vm.onBubbleTapped()
         advanceUntilIdle()
 
         assertEquals(listOf(1), player.played.map { it.single().unit.index })
@@ -471,18 +473,19 @@ class ReaderViewModelTest {
         assertEquals(1, (vm.uiState.value as ReaderUiState.Playing).playingIndex)
     }
 
-    @Test fun `tapping a line whose audio is not ready is inert`() = runTest {
+    @Test fun `tapping the bubble for a unit whose audio is not ready is inert`() = runTest {
         val player = RecordingPlayer()
         val vm = readerViewModel(player, mode = ReadingMode.Tap)
         pipeline.emit(PipelineState.Preparing(speechUnits(3), preparedUnits(1)))
         advanceUntilIdle()
 
-        vm.onLineTapped(2)
+        vm.onNext(); vm.onNext() // current = 2, whose audio is not ready
+        vm.onBubbleTapped()
         advanceUntilIdle()
 
         assertTrue(player.played.isEmpty())
         assertEquals(
-            "a rejected tap must not highlight the row either",
+            "a rejected tap must not highlight the bubble either",
             null,
             (vm.uiState.value as ReaderUiState.Playing).playingIndex,
         )

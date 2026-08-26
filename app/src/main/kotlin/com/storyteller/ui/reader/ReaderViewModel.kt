@@ -51,7 +51,7 @@ class ReaderViewModel @Inject constructor(
     /** The row currently sounding in Tap mode, or null. Cleared on a fresh page and on Finished. */
     private var playingIndex: Int? = null
 
-    /** Whatever units are synthesized so far for the current page; what onLineTapped may play. */
+    /** Whatever units are synthesized so far for the current page; what onBubbleTapped may play. */
     private var lastReady: List<PreparedUnit> = emptyList()
 
     /** Which unit is on screen. Bounded at both ends in [moveTo]; reset alongside [queued]. */
@@ -105,7 +105,7 @@ class ReaderViewModel @Inject constructor(
                     // It builds one playlist per page in reading order from unit
                     // 0, so position N is unit N. Tap plays a one-item playlist
                     // and always reports position 0, so taking it here would move
-                    // the highlight to line 0 on every tap - onLineTapped already
+                    // the highlight to line 0 on every tap - onBubbleTapped already
                     // recorded the real index and must win.
                     if (mode == ReadingMode.Auto && state is PlaybackState.Playing) {
                         playingIndex = state.playlistIndex
@@ -253,7 +253,12 @@ class ReaderViewModel @Inject constructor(
         _uiState.value = state.copy(current = bounded)
     }
 
-    /** Plays whichever unit is on screen; the one-unit playlist path is unchanged. */
+    /**
+     * Plays whichever unit is on screen. A one-unit playlist plus an immediate
+     * endOfPage(): the player needs no new API for tap mode, and a tap while
+     * something plays REPLACES it, which is what a child tapping the bubble
+     * means.
+     */
     fun onBubbleTapped() {
         if (mode != ReadingMode.Tap) return
         val prepared = lastReady.firstOrNull { it.unit.index == current } ?: return
@@ -261,20 +266,6 @@ class ReaderViewModel @Inject constructor(
         player.play(listOf(prepared))
         player.endOfPage()
         (_uiState.value as? ReaderUiState.Playing)?.let { _uiState.value = it.copy(playingIndex = current) }
-    }
-
-    /**
-     * A one-unit playlist plus an immediate endOfPage(): the player needs no new
-     * API for tap mode, and a tap while something plays REPLACES it, which is
-     * what a child tapping a new row means.
-     */
-    fun onLineTapped(index: Int) {
-        if (mode != ReadingMode.Tap) return
-        val prepared = lastReady.firstOrNull { it.unit.index == index } ?: return
-        playingIndex = index
-        player.play(listOf(prepared))
-        player.endOfPage()
-        (_uiState.value as? ReaderUiState.Playing)?.let { _uiState.value = it.copy(playingIndex = index) }
     }
 
     fun onRetry() {

@@ -4,10 +4,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import com.storyteller.domain.model.BoundingBox
 import com.storyteller.domain.model.PlaybackState
 import com.storyteller.domain.model.ReadingMode
 import org.junit.Assert.assertEquals
@@ -24,15 +27,18 @@ class ReaderScreenTest {
     @get:Rule val compose = createComposeRule()
 
     /**
-     * These fixtures only fill the fields Task 7 added (bounds, current, image)
-     * with neutral defaults — this file's own tap handling and highlighting is
-     * a later task's job, not this task's.
+     * These fixtures fill the fields Task 7 added (bounds, current, image) with
+     * neutral defaults so most tests need not think about them.
      */
-    private fun line(speaker: String, text: String, index: Int = 0) =
-        ReaderUiState.Line(index, speaker, text, bounds = null, audioReady = true)
+    private fun line(speaker: String, text: String, index: Int = 0, bounds: BoundingBox? = null, audioReady: Boolean = true) =
+        ReaderUiState.Line(index, speaker, text, bounds, audioReady)
 
-    private fun playing(lines: List<ReaderUiState.Line>, playback: PlaybackState) =
-        ReaderUiState.Playing(lines, current = 0, image = null, playback, ReadingMode.Auto, playingIndex = null)
+    private fun playing(
+        lines: List<ReaderUiState.Line>,
+        playback: PlaybackState = PlaybackState.Playing(0),
+        current: Int = 0,
+        mode: ReadingMode = ReadingMode.Auto,
+    ) = ReaderUiState.Playing(lines, current, image = null, playback, mode, playingIndex = null)
 
     @Test fun `the reader is framed with a titled bar`() {
         compose.setContent {
@@ -46,14 +52,18 @@ class ReaderScreenTest {
         compose.onNodeWithText("Storyteller").assertIsDisplayed()
     }
 
-    @Test fun `lists speakers and lines in order`() {
+    /**
+     * The reader shows one unit at a time, not the whole page - this is the
+     * regression guard for the LazyColumn-of-every-line the bubble replaced.
+     */
+    @Test fun `shows only the current unit, not the whole page`() {
         val lines = listOf(
             line("Narrator", "Once upon a time,", index = 0),
             line("Wolf", "Get away!", index = 1),
         )
         compose.setContent {
             ReaderContent(
-                playing(lines, PlaybackState.Playing(0)),
+                playing(lines, current = 0),
                 onRetry = {},
                 onBack = {},
             )
@@ -61,8 +71,8 @@ class ReaderScreenTest {
 
         compose.onNodeWithText("Narrator").assertIsDisplayed()
         compose.onNodeWithText("Once upon a time,").assertIsDisplayed()
-        compose.onNodeWithText("Wolf").assertIsDisplayed()
-        compose.onNodeWithText("Get away!").assertIsDisplayed()
+        compose.onNodeWithText("Wolf").assertDoesNotExist()
+        compose.onNodeWithText("Get away!").assertDoesNotExist()
     }
 
     /**
@@ -116,10 +126,11 @@ class ReaderScreenTest {
     }
 
     /**
-     * onLineTapped plays a one-unit playlist and immediately calls endOfPage(), so
-     * PlaybackState.Finished fires after every tapped line, not just the page's
-     * last one. In Auto mode that Finished genuinely means the page is done; in
-     * Tap mode it would falsely tell the child the story ended after one tap.
+     * onBubbleTapped plays a one-unit playlist and immediately calls endOfPage(),
+     * so PlaybackState.Finished fires after every tapped line, not just the
+     * page's last one. In Auto mode that Finished genuinely means the page is
+     * done; in Tap mode it would falsely tell the child the story ended after
+     * one tap.
      */
     @Test fun `a tapped line finishing does not say the page has ended`() {
         compose.setContent {
@@ -185,62 +196,95 @@ class ReaderScreenTest {
         )
     }
 
-    /**
-     * Task 7 dropped the per-row `tappable` flag: a row is gated on readiness
-     * alone until Task 8 rebuilds this screen around a single bubble.
-     */
-    private fun lineRowFixture(
-        index: Int = 0,
-        audioReady: Boolean = true,
-    ) = ReaderUiState.Line(index, "Bear", "Hello there", bounds = null, audioReady = audioReady)
+    // --- The bubble (Task 8) ----------------------------------------------
 
-    @Test fun `a ready row in tap mode reports the index it was given`() {
-        var tapped: Int? = null
+    @Test fun `a unit with no box shows its words instead`() {
         compose.setContent {
-            LineRow(lineRowFixture(index = 2), mode = ReadingMode.Tap, isPlaying = false, onTap = { tapped = it })
+            Bubble(line("Bear", "Hello there", bounds = null), image = null, onTap = {})
         }
 
-        compose.onNodeWithText("Hello there").performClick()
-
-        assertEquals(2, tapped)
+        compose.onNodeWithText("Hello there").assertIsDisplayed()
+        compose.onNodeWithText("Bear").assertIsDisplayed()
     }
 
-    @Test fun `a row whose audio is not ready is inert even in tap mode`() {
-        var tapped: Int? = null
+    @Test fun `tapping the bubble reports it`() {
+        var taps = 0
         compose.setContent {
-            LineRow(
-                lineRowFixture(audioReady = false),
-                mode = ReadingMode.Tap,
-                isPlaying = false,
-                onTap = { tapped = it },
+            Bubble(line("Bear", "Hello there", bounds = null), image = null, onTap = { taps++ })
+        }
+
+        compose.onNodeWithContentDescription("Read this line").performClick()
+
+        assertEquals(1, taps)
+    }
+
+    @Test fun `a bubble whose audio is not ready is inert`() {
+        var taps = 0
+        compose.setContent {
+            Bubble(
+                line("Bear", "Hello there", bounds = null, audioReady = false),
+                image = null,
+                onTap = { taps++ },
             )
         }
 
-        compose.onNodeWithText("Hello there").performClick()
+        compose.onNodeWithContentDescription("Read this line").performClick()
 
-        assertEquals(null, tapped)
+        assertEquals(0, taps)
     }
 
     /**
-     * I1 regression: a first pass at dropping `tappable` gated this row on
-     * `audioReady` alone, which put every ready Auto row back in the click and
-     * accessibility tree - rippling on touch and reachable by TalkBack even
-     * though onLineTapped silently discards Auto taps. Pins that a ready Auto
-     * row stays inert.
+     * Carry-forward from the previous task's review: this exact defect (gating
+     * the tap only on `audioReady`, not on the mode too) was found and fixed
+     * for the old list rows, then reintroduced when a field was removed, then
+     * fixed again. `onBubbleTapped()` early-returns unless the mode is Tap, so
+     * an Auto-mode bubble whose audio is ready must not be a live tap target -
+     * otherwise it ripples on touch and announces itself to TalkBack while the
+     * tap is silently discarded underneath.
      */
-    @Test fun `a ready row in auto mode is still inert`() {
-        var tapped: Int? = null
+    @Test fun `an auto-mode bubble with ready audio does not report a tap`() {
+        var taps = 0
         compose.setContent {
-            LineRow(
-                lineRowFixture(audioReady = true),
+            Bubble(
+                line("Bear", "Hello there", bounds = null, audioReady = true),
+                image = null,
                 mode = ReadingMode.Auto,
-                isPlaying = false,
-                onTap = { tapped = it },
+                onTap = { taps++ },
             )
         }
 
-        compose.onNodeWithText("Hello there").performClick()
+        compose.onNodeWithContentDescription("Read this line").performClick()
 
-        assertEquals(null, tapped)
+        assertEquals(0, taps)
+    }
+
+    @Test fun `previous is disabled on the first unit and next on the last`() {
+        compose.setContent {
+            ReaderContent(
+                playing(listOf(line("Bear", "One"), line("Mouse", "Two")), current = 0),
+                onRetry = {}, onBack = {}, onNext = {}, onPrevious = {}, onBubbleTapped = {},
+            )
+        }
+
+        compose.onNodeWithContentDescription("Previous line").assertIsNotEnabled()
+        compose.onNodeWithContentDescription("Next line").assertIsEnabled()
+    }
+
+    @Test fun `next and previous invoke their callbacks`() {
+        var next = 0
+        var previous = 0
+        compose.setContent {
+            ReaderContent(
+                playing(listOf(line("Bear", "One"), line("Mouse", "Two")), current = 1),
+                onRetry = {}, onBack = {},
+                onNext = { next++ }, onPrevious = { previous++ }, onBubbleTapped = {},
+            )
+        }
+
+        compose.onNodeWithContentDescription("Next line").assertIsNotEnabled()
+        compose.onNodeWithContentDescription("Previous line").performClick()
+
+        assertEquals(1, previous)
+        assertEquals(0, next)
     }
 }

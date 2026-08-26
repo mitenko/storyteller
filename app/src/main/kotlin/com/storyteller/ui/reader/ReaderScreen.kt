@@ -1,6 +1,6 @@
 package com.storyteller.ui.reader
 
-import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -9,22 +9,22 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.storyteller.R
+import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.PlaybackState
 import com.storyteller.domain.model.ReadingMode
 
@@ -51,7 +52,9 @@ fun ReaderScreen(
         state = state,
         onRetry = viewModel::onRetry,
         onBack = onBack,
-        onLineTapped = viewModel::onLineTapped,
+        onNext = viewModel::onNext,
+        onPrevious = viewModel::onPrevious,
+        onBubbleTapped = viewModel::onBubbleTapped,
     )
 }
 
@@ -61,7 +64,9 @@ fun ReaderContent(
     state: ReaderUiState,
     onRetry: () -> Unit,
     onBack: () -> Unit,
-    onLineTapped: (Int) -> Unit = {},
+    onNext: () -> Unit = {},
+    onPrevious: () -> Unit = {},
+    onBubbleTapped: () -> Unit = {},
 ) {
     ReaderFrame { padding ->
         Column(
@@ -75,23 +80,44 @@ fun ReaderContent(
                 }
 
                 is ReaderUiState.Playing -> {
-                    LazyColumn(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    // The reader shows one unit at a time, not the whole page - see
+                    // Bubble's kdoc for why null always falls back to text rather
+                    // than an error. `current` is clamped by ReaderViewModel to a
+                    // valid index whenever `lines` is non-empty; an empty `lines`
+                    // (no units known yet for this page) has nothing to show here,
+                    // so only the nav row and the way back to the camera remain.
+                    val line = state.lines.getOrNull(state.current)
+                    if (line != null) {
+                        Bubble(
+                            line = line,
+                            image = state.image,
+                            onTap = onBubbleTapped,
+                            mode = state.mode,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        items(state.lines) { line ->
-                            LineRow(
-                                line = line,
-                                mode = state.mode,
-                                isPlaying = line.index == state.playingIndex,
-                                onTap = onLineTapped,
+                        IconButton(onClick = onPrevious, enabled = state.current > 0) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_arrow_back),
+                                contentDescription = "Previous line",
+                            )
+                        }
+                        IconButton(onClick = onNext, enabled = state.current < state.lines.size - 1) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_arrow_forward),
+                                contentDescription = "Next line",
                             )
                         }
                     }
 
                     // The only place PlaybackState is rendered. Auto reads the page
                     // straight through, so Finished there really does mean the page is
-                    // done. In Tap mode, onLineTapped() plays a one-unit playlist and
+                    // done. In Tap mode, onBubbleTapped() plays a one-unit playlist and
                     // immediately calls endOfPage(), so Finished fires after every
                     // tapped line - showing "The End." there would tell the child the
                     // story ended after a single tap, not after the page did.
@@ -140,36 +166,55 @@ private fun Centered(content: @Composable () -> Unit) {
 }
 
 /**
- * Greying (via [ReaderUiState.Line.audioReady]) and tappability (via [mode] +
- * [ReaderUiState.Line.audioReady]) are deliberately separate: a row whose
- * audio is not ready greys in BOTH modes, but only a Tap-mode, ready row is
- * ever clickable. A row that fails either check is genuinely inert, not just
- * faded: clickable(enabled = false) both drops the click handler and removes
- * the row from the accessibility/click tree, so a stray tap - or a screen
- * reader double-tap - on it still cannot fire onTap, and an Auto row never
- * ripples or announces as actionable to TalkBack.
+ * One unit, filling the screen. The crop is remembered per (unit, image) so
+ * scrolling back and forth does not re-decode the page each time.
  *
- * Task 7 dropped the standalone `ReaderUiState.Line.tappable` flag - Line no
- * longer tracks per-row tappability - so this composable rebuilds the same
- * mode-aware gate from [mode] and [ReaderUiState.Line.audioReady] at the one
- * call site that still needs it, pending Task 8's rewrite of this screen into
- * the bubble-at-a-time view. (A first pass here briefly gated on `audioReady`
- * alone, regressing an Auto row back into the click/accessibility tree - keep
- * the mode check.)
+ * When there is no bubble to show - no box, an implausible box, a null image,
+ * an undecodable page - the words are rendered instead. That is the single
+ * fallback every failure path in this screen lands on, so the child can
+ * always read and hear the line whatever the model returned. A prose page has
+ * no bubbles at all, so this is the NORMAL rendering there, not an error.
+ *
+ * Tappability is gated on [mode] as well as [ReaderUiState.Line.audioReady]:
+ * [ReaderViewModel.onBubbleTapped] early-returns unless the mode is Tap, so
+ * gating only on readiness would leave an Auto-mode bubble rippling on touch
+ * and reachable by TalkBack while the tap is silently discarded underneath.
+ * This exact defect was found and fixed for the old list rows (see the
+ * deleted `LineRow`'s kdoc history), then reintroduced when a field was
+ * removed, then fixed again - it must not land a third time here.
  */
 @Composable
-internal fun LineRow(line: ReaderUiState.Line, mode: ReadingMode, isPlaying: Boolean, onTap: (Int) -> Unit) {
-    Row(
-        Modifier
+internal fun Bubble(
+    line: ReaderUiState.Line,
+    image: PageImage?,
+    onTap: () -> Unit,
+    mode: ReadingMode = ReadingMode.Tap,
+    modifier: Modifier = Modifier,
+) {
+    val bitmap = remember(line.index, image) {
+        image?.let { cropBubble(it, line.bounds) }?.asImageBitmap()
+    }
+    Column(
+        modifier
             .fillMaxWidth()
-            .clickable(enabled = mode == ReadingMode.Tap && line.audioReady) { onTap(line.index) }
-            .background(if (isPlaying) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .clickable(
+                onClickLabel = "Read this line",
+                enabled = mode == ReadingMode.Tap && line.audioReady,
+                onClick = onTap,
+            )
+            .semantics { contentDescription = "Read this line" },
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Column(Modifier.alpha(if (line.audioReady) 1f else 0.4f)) {
-            Text(line.speaker, style = MaterialTheme.typography.labelMedium)
-            Text(line.text, style = MaterialTheme.typography.bodyLarge)
+        Text(line.speaker, style = MaterialTheme.typography.labelLarge)
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap,
+                contentDescription = line.text,
+                modifier = Modifier.fillMaxWidth(),
+                contentScale = ContentScale.Fit,
+            )
+        } else {
+            Text(line.text, style = MaterialTheme.typography.headlineSmall)
         }
     }
 }
