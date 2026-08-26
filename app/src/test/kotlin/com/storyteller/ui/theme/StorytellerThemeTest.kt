@@ -48,7 +48,6 @@ class StorytellerThemeTest {
         assertTrue("expected a light background, got $background", background.luminance() > 0.5f)
     }
 
-    /** Both captured in ONE composition: the rule permits setContent only once per test. */
     /**
      * The bug this pins: MaterialTheme supplies a colour SCHEME but does not set
      * LocalContentColor, and Text with no explicit colour falls back to black.
@@ -74,6 +73,7 @@ class StorytellerThemeTest {
         assertTrue("expected dark text in light mode, got $content", content.luminance() < 0.2f)
     }
 
+    /** Both captured in ONE composition: the rule permits setContent only once per test. */
     @Test fun `dark and light are actually different`() {
         var dark = Color.Unspecified
         var light = Color.Unspecified
@@ -99,5 +99,40 @@ class StorytellerThemeTest {
         val background = backgroundFor(ThemeChoice.System)
 
         assertTrue("expected light on a day device, got $background", background.luminance() > 0.5f)
+    }
+
+    // --- isDarkTheme (I7) -------------------------------------------------
+    //
+    // MainActivity drives the status-bar icon appearance off isDarkTheme(theme)
+    // directly (not by re-deriving light/dark some other way), specifically so
+    // it can never disagree with what StorytellerTheme itself renders from.
+    // These pin that the extracted function still resolves every ThemeChoice
+    // the same way StorytellerTheme's background-colour tests above already
+    // show the theme itself does.
+
+    private fun resolvedDark(choice: ThemeChoice): Boolean {
+        var resolved = false
+        compose.setContent { resolved = isDarkTheme(choice) }
+        return resolved
+    }
+
+    @Test fun `isDarkTheme resolves Dark to true`() {
+        assertTrue(resolvedDark(ThemeChoice.Dark))
+    }
+
+    @Test fun `isDarkTheme resolves Light to false`() {
+        assertTrue(!resolvedDark(ThemeChoice.Light))
+    }
+
+    @Test
+    @Config(sdk = [34], qualifiers = "night")
+    fun `isDarkTheme resolves System to the device's own dark setting`() {
+        assertTrue(resolvedDark(ThemeChoice.System))
+    }
+
+    @Test
+    @Config(sdk = [34], qualifiers = "notnight")
+    fun `isDarkTheme resolves System to the device's own light setting`() {
+        assertTrue(!resolvedDark(ThemeChoice.System))
     }
 }

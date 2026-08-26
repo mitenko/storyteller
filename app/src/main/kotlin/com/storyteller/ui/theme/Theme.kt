@@ -12,10 +12,10 @@ import com.storyteller.domain.model.ThemeChoice
 
 /**
  * Only the roles this app actually renders are overridden; everything else keeps
- * Material's defaults. secondaryContainer earns its place explicitly — it is the
- * highlight behind the line currently being read, so it has to stay legible
- * against the body text in both palettes rather than inherit a colour picked for
- * a different ground.
+ * Material's defaults. secondaryContainer earns its place explicitly — it has to
+ * stay legible against the body text in both palettes rather than inherit a
+ * colour picked for a different ground, so it is set even though nothing in the
+ * bubble reader currently draws on it.
  */
 private val LightColors = lightColorScheme(
     primary = Ink,
@@ -40,6 +40,19 @@ private val DarkColors = darkColorScheme(
 )
 
 /**
+ * The dark/light decision [StorytellerTheme] renders from, lifted out to a
+ * standalone composable so a caller outside the theme — MainActivity, to drive
+ * the system status-bar icon contrast (I7) — can read the SAME resolved value
+ * rather than recomputing the choice and risking the two disagreeing.
+ */
+@Composable
+fun isDarkTheme(choice: ThemeChoice): Boolean = when (choice) {
+    ThemeChoice.Dark -> true
+    ThemeChoice.Light -> false
+    ThemeChoice.System -> isSystemInDarkTheme()
+}
+
+/**
  * [choice] defaults to Dark, matching both the app's default setting and the
  * window background painted before the first frame — so a caller that has not
  * yet resolved the stored preference shows the right thing rather than flashing.
@@ -49,11 +62,7 @@ private val DarkColors = darkColorScheme(
  */
 @Composable
 fun StorytellerTheme(choice: ThemeChoice = ThemeChoice.Dark, content: @Composable () -> Unit) {
-    val dark = when (choice) {
-        ThemeChoice.Dark -> true
-        ThemeChoice.Light -> false
-        ThemeChoice.System -> isSystemInDarkTheme()
-    }
+    val dark = isDarkTheme(choice)
     MaterialTheme(colorScheme = if (dark) DarkColors else LightColors) {
         // The Surface is load-bearing, not decoration. MaterialTheme supplies a
         // colour SCHEME but neither paints a ground nor sets LocalContentColor,
