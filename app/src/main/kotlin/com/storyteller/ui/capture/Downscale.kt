@@ -85,28 +85,32 @@ fun downscaleToPageImage(
  * logged rather than allowed to fail the capture; the caller falls back to the
  * downscaled-but-correctly-oriented upload bytes.
  */
-private fun rotatedFullResolutionOrNull(jpeg: ByteArray, rotationDegrees: Int, quality: Int): ByteArray? = try {
-    val full = requireNonNull(BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, BitmapFactory.Options()))
-    val rotated = Bitmap.createBitmap(
-        full,
-        0,
-        0,
-        full.width,
-        full.height,
-        Matrix().apply { postRotate(rotationDegrees.toFloat()) },
-        true,
-    )
-    val out = ByteArrayOutputStream()
-    try {
+private fun rotatedFullResolutionOrNull(jpeg: ByteArray, rotationDegrees: Int, quality: Int): ByteArray? {
+    var full: Bitmap? = null
+    var rotated: Bitmap? = null
+    return try {
+        full = requireNonNull(BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, BitmapFactory.Options()))
+        rotated = Bitmap.createBitmap(
+            full,
+            0,
+            0,
+            full.width,
+            full.height,
+            Matrix().apply { postRotate(rotationDegrees.toFloat()) },
+            true,
+        )
+        val out = ByteArrayOutputStream()
         rotated.compress(Bitmap.CompressFormat.JPEG, quality, out)
+        out.toByteArray()
+    } catch (t: Throwable) {
+        Log.e(TAG, "failed to build a full-resolution rotated display copy; falling back to the upload copy", t)
+        null
     } finally {
-        if (rotated !== full) rotated.recycle()
-        full.recycle()
+        // Recycle whatever actually got allocated, however far we got — this runs
+        // on the OOM path too, freeing memory as promptly as possible.
+        if (rotated != null && rotated !== full) rotated.recycle()
+        full?.recycle()
     }
-    out.toByteArray()
-} catch (t: Throwable) {
-    Log.e(TAG, "failed to build a full-resolution rotated display copy; falling back to the upload copy", t)
-    null
 }
 
 private fun requireNonNull(bitmap: Bitmap?): Bitmap =
