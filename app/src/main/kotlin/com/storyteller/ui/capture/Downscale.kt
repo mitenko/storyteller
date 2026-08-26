@@ -3,12 +3,14 @@ package com.storyteller.ui.capture
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
+import android.util.Log
 import com.storyteller.domain.model.PageImage
 import java.io.ByteArrayOutputStream
 
 /** 1568 px is where Haiku 4.5 stops gaining detail; see Global Constraints. */
 const val MAX_LONG_EDGE_PX = 1568
 private const val JPEG_QUALITY = 85
+private const val TAG = "Downscale"
 
 fun downscaleToPageImage(
     jpeg: ByteArray,
@@ -59,10 +61,52 @@ fun downscaleToPageImage(
     if (scaled !== decoded) scaled.recycle()
     decoded.recycle()
     val encoded = out.toByteArray()
-    // If nothing was actually downscaled (only rotated), the rotated output IS the
-    // display copy — the raw sensor JPEG is sideways and must never reach the reader.
-    val displayBytes = if (scaled === decoded) encoded else jpeg
+
+    // displayBytes must always share bytes' orientation — never the raw sensor
+    // JPEG when rotation is baked into bytes, or bubble crops land on a sideways
+    // page. When nothing was rotated the raw input already agrees with bytes, so
+    // reuse it rather than copy. When the image was small enough to skip
+    // downscaling, `encoded` above IS already a full-resolution rotated copy, so
+    // reuse that. Only when the image was both downscaled AND rotated is there no
+    // full-resolution rotated copy lying around already — build one separately.
+    val displayBytes = when {
+        rotationDegrees == 0 -> jpeg
+        longEdge <= maxEdge -> encoded
+        else -> rotatedFullResolutionOrNull(jpeg, rotationDegrees, quality) ?: encoded
+    }
     return PageImage(encoded, "image/jpeg", displayBytes = displayBytes)
+}
+
+/**
+ * Decodes [jpeg] at full resolution and bakes in [rotationDegrees], for a display
+ * copy that matches the upright orientation of the (downscaled) upload bytes. A
+ * full-resolution decode plus a rotated copy can be tens of megabytes on a modern
+ * phone photo, so any failure here — most notably OutOfMemoryError — is caught and
+ * logged rather than allowed to fail the capture; the caller falls back to the
+ * downscaled-but-correctly-oriented upload bytes.
+ */
+private fun rotatedFullResolutionOrNull(jpeg: ByteArray, rotationDegrees: Int, quality: Int): ByteArray? = try {
+    val full = requireNonNull(BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, BitmapFactory.Options()))
+    val rotated = Bitmap.createBitmap(
+        full,
+        0,
+        0,
+        full.width,
+        full.height,
+        Matrix().apply { postRotate(rotationDegrees.toFloat()) },
+        true,
+    )
+    val out = ByteArrayOutputStream()
+    try {
+        rotated.compress(Bitmap.CompressFormat.JPEG, quality, out)
+    } finally {
+        if (rotated !== full) rotated.recycle()
+        full.recycle()
+    }
+    out.toByteArray()
+} catch (t: Throwable) {
+    Log.e(TAG, "failed to build a full-resolution rotated display copy; falling back to the upload copy", t)
+    null
 }
 
 private fun requireNonNull(bitmap: Bitmap?): Bitmap =

@@ -80,6 +80,19 @@ class DownscaleTest {
         assertEquals(4000, displayW)
     }
 
+    @Test fun `an oversized AND rotated capture gets a full-resolution rotated display copy`() {
+        val original = jpeg(4000, 3000)
+
+        val page = downscaleToPageImage(original, rotationDegrees = 90)
+
+        val (displayW, displayH) = sizeOf(page.displayBytes)
+        // Landscape input rotated 90 degrees comes out portrait, same as bytes.
+        assertTrue("display copy should be portrait after rotation", displayH > displayW)
+        // Full-resolution, not clamped to the 1568px upload ceiling.
+        assertEquals(3000, displayW)
+        assertEquals(4000, displayH)
+    }
+
     @Test fun `a small capture shares one array rather than copying it`() {
         val original = jpeg(800, 600)
 
