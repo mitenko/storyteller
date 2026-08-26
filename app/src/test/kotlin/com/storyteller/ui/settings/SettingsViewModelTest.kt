@@ -1,6 +1,7 @@
 package com.storyteller.ui.settings
 
 import com.storyteller.domain.model.ReadingMode
+import com.storyteller.domain.model.ThemeChoice
 import com.storyteller.domain.repository.SettingsRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -38,6 +39,8 @@ class SettingsViewModelTest {
     private class ThrowingWriteSettingsRepository(initial: ReadingMode = ReadingMode.Auto) : SettingsRepository {
         override val mode: Flow<ReadingMode> = MutableStateFlow(initial)
         override suspend fun setMode(mode: ReadingMode): Unit = throw RuntimeException("disk full")
+        override val theme: Flow<ThemeChoice> = MutableStateFlow(ThemeChoice.Dark)
+        override suspend fun setTheme(theme: ThemeChoice): Unit = throw RuntimeException("disk full")
     }
 
     @Test fun `a write fault from setMode does not crash the caller`() = runTest(dispatcher) {

@@ -37,3 +37,6 @@ desktop.ini
 # Photos of real book pages used by the vision eval harness: potentially
 # copyrighted material, and large. Keep them local.
 evals/fixtures/
+
+# Cygwin/MSYS crash debris
+*.stackdump

@@ -10,6 +10,7 @@ import com.storyteller.domain.model.PipelineState
 import com.storyteller.domain.model.PlaybackState
 import com.storyteller.domain.model.PreparedUnit
 import com.storyteller.domain.model.ReadingMode
+import com.storyteller.domain.model.ThemeChoice
 import com.storyteller.domain.model.SpeechUnit
 import com.storyteller.domain.repository.PagePlayer
 import com.storyteller.domain.repository.SettingsRepository
@@ -20,6 +21,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -64,6 +66,8 @@ class FakeSettingsRepository(initial: ReadingMode = ReadingMode.Auto) : Settings
     }
 
     override suspend fun setMode(mode: ReadingMode) { modes.value = mode }
+    override val theme: Flow<ThemeChoice> = flowOf(ThemeChoice.Dark)
+    override suspend fun setTheme(theme: ThemeChoice) = Unit
 }
 
 /**
@@ -82,6 +86,8 @@ class ThrowsAfterFirstEmissionSettingsRepository : SettingsRepository {
     }
 
     override suspend fun setMode(mode: ReadingMode) = Unit
+    override val theme: Flow<ThemeChoice> = flowOf(ThemeChoice.Dark)
+    override suspend fun setTheme(theme: ThemeChoice) = Unit
 }
 
 class FakePlayer : PagePlayer {

@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.storyteller.domain.model.ReadingMode
+import com.storyteller.domain.model.ThemeChoice
 import com.storyteller.domain.repository.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -38,6 +39,22 @@ class SettingsViewModel @Inject constructor(
                 throw e
             } catch (e: Throwable) {
                 Log.w(TAG, "failed to persist reading mode", e)
+            }
+        }
+    }
+
+    val theme: StateFlow<ThemeChoice> =
+        settings.theme.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ThemeChoice.Dark)
+
+    /** Swallows a write fault for the same reason [setMode] does. */
+    fun setTheme(theme: ThemeChoice) {
+        viewModelScope.launch {
+            try {
+                settings.setTheme(theme)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                Log.w(TAG, "failed to persist theme", e)
             }
         }
     }

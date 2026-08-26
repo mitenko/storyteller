@@ -6,6 +6,7 @@ import com.storyteller.data.local.SettingEntity
 import com.storyteller.data.local.SettingsDao
 import com.storyteller.data.local.StorytellerDatabase
 import com.storyteller.domain.model.ReadingMode
+import com.storyteller.domain.model.ThemeChoice
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
@@ -39,6 +40,33 @@ class SettingsRepositoryImplTest {
     @Test fun `an unrecognised stored value falls back to auto`() = runTest {
         db.settingsDao().put(com.storyteller.data.local.SettingEntity("reading_mode", "sideways"))
         assertEquals(ReadingMode.Auto, repo.mode.first())
+    }
+
+    @Test fun `defaults to dark when no theme has been stored`() = runTest {
+        assertEquals(ThemeChoice.Dark, repo.theme.first())
+    }
+
+    @Test fun `round-trips a stored theme`() = runTest {
+        repo.setTheme(ThemeChoice.Light)
+        assertEquals(ThemeChoice.Light, repo.theme.first())
+
+        repo.setTheme(ThemeChoice.System)
+        assertEquals(ThemeChoice.System, repo.theme.first())
+    }
+
+    @Test fun `an unrecognised stored theme falls back to dark`() = runTest {
+        db.settingsDao().put(SettingEntity("theme", "sepia"))
+        assertEquals(ThemeChoice.Dark, repo.theme.first())
+    }
+
+    /** Same reasoning as the reading-mode read below: a settings fault must never blank the app. */
+    @Test fun `a throwing theme read defaults to dark rather than propagating`() = runTest {
+        val throwing = object : SettingsDao {
+            override fun observe(key: String): Flow<SettingEntity?> = flow { throw RuntimeException("disk fault") }
+            override suspend fun put(entity: SettingEntity) = throw RuntimeException("disk fault")
+        }
+
+        assertEquals(ThemeChoice.Dark, SettingsRepositoryImpl(throwing).theme.first())
     }
 
     /**

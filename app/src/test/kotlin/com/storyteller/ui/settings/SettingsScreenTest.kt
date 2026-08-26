@@ -1,10 +1,13 @@
 package com.storyteller.ui.settings
 
 import androidx.compose.ui.test.isToggleable
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.storyteller.domain.model.ReadingMode
+import com.storyteller.domain.model.ThemeChoice
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -43,5 +46,21 @@ class SettingsScreenTest {
         compose.onNode(isToggleable()).performClick()
 
         assertEquals(listOf(ReadingMode.Tap), changes)
+    }
+    @Test fun `each theme option reports itself when chosen`() {
+        val chosen = mutableListOf<ThemeChoice>()
+        compose.setContent { ThemeRow(ThemeChoice.Dark, onChange = { chosen += it }) }
+
+        compose.onNodeWithText("Light").performClick()
+        compose.onNodeWithText("Follow the device").performClick()
+
+        assertEquals(listOf(ThemeChoice.Light, ThemeChoice.System), chosen)
+    }
+
+    @Test fun `the current theme is the one shown as selected`() {
+        compose.setContent { ThemeRow(ThemeChoice.Light, onChange = {}) }
+
+        compose.onNodeWithText("Light").assertIsSelected()
+        compose.onNodeWithText("Dark").assertIsNotSelected()
     }
 }
