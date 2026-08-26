@@ -227,7 +227,7 @@ class ReaderViewModel @Inject constructor(
                     text = u.text,
                     bounds = u.bounds,
                     // Greying tracks readiness alone, in both modes - Auto used to
-                    // report every row ready regardless of synthesis progress,
+                    // report every bubble ready regardless of synthesis progress,
                     // which lost Auto's only progress indication (F7).
                     audioReady = u.index in readyIndices,
                 )

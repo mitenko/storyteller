@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import com.storyteller.domain.model.BoundingBox
 import com.storyteller.domain.model.PageImage
 import java.io.ByteArrayOutputStream
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -54,10 +55,53 @@ class BubbleCropTest {
         }
     }
 
+    /**
+     * C1 moved cropBubble to BitmapRegionDecoder.decodeRegion, which allocates a
+     * fresh bitmap for whatever region it is asked for - there is no longer a
+     * full-page bitmap for a whole-cover rect to alias, so the old
+     * `cropped === full` guard and its recycled-source failure mode are gone.
+     * This still earns its place: I4 (revert-and-confirm-RED, done against the
+     * pre-C1 implementation) showed Robolectric's ShadowBitmap really did
+     * reproduce that aliasing bug when the guard was removed, so a whole-image
+     * crop staying usable is a real regression this guards against, not a
+     * vacuous assertion.
+     */
     @Test fun `a box spanning the whole image returns a usable, non-recycled bitmap`() {
         val bitmap = cropBubble(page(), BoundingBox(0f, 0f, 1f, 1f))
 
         assertNotNull(bitmap)
-        assertFalse("bitmap must not be the recycled source", bitmap!!.isRecycled)
+        assertFalse("bitmap must not be recycled", bitmap!!.isRecycled)
+    }
+
+    // --- sampleSizeFor (C1) ---------------------------------------------------
+    //
+    // cropBubble's own tests above cannot observe downsampling directly:
+    // Robolectric's ShadowBitmapRegionDecoder.decodeRegion ignores
+    // BitmapFactory.Options.inSampleSize entirely and hands back a bitmap sized
+    // to the requested region at full resolution regardless (confirmed
+    // empirically - a whole-page 4000x3000 crop still came back 4000px wide
+    // with inSampleSize=2 requested). That is a shadow limitation, not
+    // something production code can be wrong about, so the sampling math is
+    // pinned directly here instead, against plain Kotlin with no Android
+    // dependency.
+
+    @Test fun `a region no bigger than the target is not downsampled`() {
+        assertEquals(1, sampleSizeFor(800, 600, 1440))
+        assertEquals(1, sampleSizeFor(1440, 900, 1440))
+    }
+
+    @Test fun `a region past the target is downsampled by the largest power of two that does not undershoot`() {
+        // 4000 / 2 = 2000 (still >= 1440); 4000 / 4 = 1000 (< 1440) would
+        // undershoot, so 2 is the answer, not 4.
+        assertEquals(2, sampleSizeFor(4000, 3000, 1440))
+    }
+
+    @Test fun `sampling is driven by the longer edge`() {
+        // Portrait region: height (4000) is the long edge, not width (800).
+        assertEquals(2, sampleSizeFor(800, 4000, 1440))
+    }
+
+    @Test fun `a much larger region can need more than one doubling`() {
+        assertEquals(4, sampleSizeFor(8000, 6000, 1440))
     }
 }

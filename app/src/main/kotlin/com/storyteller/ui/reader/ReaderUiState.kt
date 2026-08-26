@@ -19,11 +19,18 @@ sealed interface ReaderUiState {
         val lines: List<Line>,
         /** Which unit is on screen - the reader shows one bubble at a time. */
         val current: Int,
-        /** The page [lines] were read from; what Task 8's Bubble crops. */
+        /** The page [lines] were read from; what [Bubble] crops a speech-bubble region out of. */
         val image: PageImage?,
         val playback: PlaybackState,
         val mode: ReadingMode,
-        /** The row currently sounding, or null. Tap mode knows it because it handled the tap. */
+        /**
+         * The unit currently sounding, or null. Tap mode knows it because it
+         * handled the tap; Auto mode takes it from the player's own playlist
+         * position. Usually equal to [current] - it diverges only when a child
+         * has tapped a bubble and then navigated away with the arrows while its
+         * audio is still playing, which is exactly the case [Bubble]'s
+         * `sounding` marker exists to show.
+         */
         val playingIndex: Int?,
     ) : ReaderUiState
     data class Error(val message: String, val canRetry: Boolean) : ReaderUiState
@@ -35,10 +42,10 @@ sealed interface ReaderUiState {
         /** The unit's speech-bubble box, or null when the model could not locate one. */
         val bounds: BoundingBox?,
         /**
-         * False until this line's audio has been synthesized - drives the row's
+         * False until this line's audio has been synthesized - drives [Bubble]'s
          * greyed-out rendering in BOTH modes. Before F7 this was conflated with
-         * tappability under one `enabled` flag, so Auto mode (where every row is
-         * always tappable-in-spirit) never greyed at all and lost its only
+         * tappability under one `enabled` flag, so Auto mode (where every bubble
+         * is always tappable-in-spirit) never greyed at all and lost its only
          * synthesis-progress indication.
          */
         val audioReady: Boolean,

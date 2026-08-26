@@ -3,6 +3,7 @@ package com.storyteller.ui.reader
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -20,9 +21,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -35,6 +38,8 @@ import com.storyteller.R
 import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.PlaybackState
 import com.storyteller.domain.model.ReadingMode
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun ReaderScreen(
@@ -93,21 +98,37 @@ fun ReaderContent(
                             image = state.image,
                             onTap = onBubbleTapped,
                             mode = state.mode,
+                            sounding = state.playingIndex == state.current,
                             modifier = Modifier.weight(1f),
                         )
                     }
 
+                    // I6: in Auto the ViewModel overwrites `current` from the
+                    // player's own playlist position at every transition (see
+                    // ReaderViewModel's player.state collector), so an arrow that
+                    // only advances `current` locally would be overruled a moment
+                    // later - the bubble would jump forward on a tap, then snap
+                    // back once the player's next Playing report lands. Auto reads
+                    // the page through on its own; an arrow that fights that is
+                    // worse than no arrow, so both are disabled outright in Auto
+                    // rather than merely gated on position.
                     Row(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        IconButton(onClick = onPrevious, enabled = state.current > 0) {
+                        IconButton(
+                            onClick = onPrevious,
+                            enabled = state.mode == ReadingMode.Tap && state.current > 0,
+                        ) {
                             Icon(
                                 painter = painterResource(R.drawable.ic_arrow_back),
                                 contentDescription = "Previous line",
                             )
                         }
-                        IconButton(onClick = onNext, enabled = state.current < state.lines.size - 1) {
+                        IconButton(
+                            onClick = onNext,
+                            enabled = state.mode == ReadingMode.Tap && state.current < state.lines.size - 1,
+                        ) {
                             Icon(
                                 painter = painterResource(R.drawable.ic_arrow_forward),
                                 contentDescription = "Next line",
@@ -165,9 +186,26 @@ private fun Centered(content: @Composable () -> Unit) {
     ) { content() }
 }
 
+internal const val NOT_READY_ALPHA = 0.4f
+
 /**
- * One unit, filling the screen. The crop is remembered per (unit, image) so
- * scrolling back and forth does not re-decode the page each time.
+ * The alpha [Bubble]'s content renders at (I2) - pulled out to a plain,
+ * Android-free function so its exact values are pinned by a fast, direct unit
+ * test, separate from whether that alpha modifier ends up wired to the right
+ * content (which is a one-line change visible at the call site below).
+ */
+internal fun contentAlphaFor(audioReady: Boolean): Float = if (audioReady) 1f else NOT_READY_ALPHA
+
+/**
+ * One unit, filling the screen. The crop is produced per (unit, image) so
+ * scrolling back and forth does not re-decode the region each time, and is
+ * decoded on [Dispatchers.Default] rather than inline in composition: even a
+ * region-scale decode (see [cropBubble]'s kdoc) is filesystem/CPU work that
+ * has no business running synchronously on the frame that re-keys it, which in
+ * Auto mode is every single line boundary. Until it resolves, or if it never
+ * produces a bitmap, the text fallback below covers the gap - there is no
+ * loading spinner here, because the wait is normally imperceptible and a
+ * flash of one would be worse than the brief text-first render.
  *
  * When there is no bubble to show - no box, an implausible box, a null image,
  * an undecodable page - the words are rendered instead. That is the single
@@ -179,9 +217,14 @@ private fun Centered(content: @Composable () -> Unit) {
  * [ReaderViewModel.onBubbleTapped] early-returns unless the mode is Tap, so
  * gating only on readiness would leave an Auto-mode bubble rippling on touch
  * and reachable by TalkBack while the tap is silently discarded underneath.
- * This exact defect was found and fixed for the old list rows (see the
- * deleted `LineRow`'s kdoc history), then reintroduced when a field was
- * removed, then fixed again - it must not land a third time here.
+ * This exact defect was found and fixed for the old list rows, then
+ * reintroduced when a field was removed, then fixed again - it must not land
+ * a third time here.
+ *
+ * [sounding] marks the one bubble whose audio is actually playing right now -
+ * distinct from simply being on screen. In Tap mode a child can tap a bubble
+ * and then navigate away with the arrows while its audio keeps sounding; this
+ * is the only place that mismatch is shown.
  */
 @Composable
 internal fun Bubble(
@@ -189,10 +232,13 @@ internal fun Bubble(
     image: PageImage?,
     onTap: () -> Unit,
     mode: ReadingMode = ReadingMode.Tap,
+    sounding: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
-    val bitmap = remember(line.index, image) {
-        image?.let { cropBubble(it, line.bounds) }?.asImageBitmap()
+    val bitmap by produceState<ImageBitmap?>(null, line.index, image) {
+        value = image?.let { pageImage ->
+            withContext(Dispatchers.Default) { cropBubble(pageImage, line.bounds) }
+        }?.asImageBitmap()
     }
     Column(
         modifier
@@ -205,16 +251,35 @@ internal fun Bubble(
             .semantics { contentDescription = "Read this line" },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(line.speaker, style = MaterialTheme.typography.labelLarge)
-        if (bitmap != null) {
-            Image(
-                bitmap = bitmap,
-                contentDescription = line.text,
-                modifier = Modifier.fillMaxWidth(),
-                contentScale = ContentScale.Fit,
-            )
-        } else {
-            Text(line.text, style = MaterialTheme.typography.headlineSmall)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(line.speaker, style = MaterialTheme.typography.labelLarge)
+            if (sounding) {
+                Text(
+                    "♪",
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier
+                        .padding(start = 4.dp)
+                        .semantics { contentDescription = "Sounding now" },
+                )
+            }
+        }
+        // I2: greyed rather than hidden, so a bubble whose audio has not been
+        // synthesized yet still reads as present-but-waiting, not absent - the
+        // spec's failure table calls this out explicitly for a tap on a
+        // not-yet-ready unit, and Auto shows the same signal for the same
+        // reason: a child watching Auto advance should be able to tell a
+        // 200ms wait from a 20s one at a glance, not just by nothing playing.
+        Box(Modifier.alpha(contentAlphaFor(line.audioReady))) {
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap!!,
+                    contentDescription = line.text,
+                    modifier = Modifier.fillMaxWidth(),
+                    contentScale = ContentScale.Fit,
+                )
+            } else {
+                Text(line.text, style = MaterialTheme.typography.headlineSmall)
+            }
         }
     }
 }
