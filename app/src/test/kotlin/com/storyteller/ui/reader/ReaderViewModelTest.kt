@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import com.storyteller.domain.ReadingPipeline
+import com.storyteller.domain.pageImage
 import com.storyteller.domain.model.FailureReason
 import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.PipelineState
@@ -188,9 +189,8 @@ class ReaderViewModelTest {
         val preparing = vm.uiState.value as ReaderUiState.Playing
         assertEquals(3, preparing.lines.size)
         // F7: Auto rows grey by readiness just like Tap rows do; only unit 0 is
-        // ready here. Auto rows are also never tappable.
+        // ready here.
         assertEquals(listOf(true, false, false), preparing.lines.map { it.audioReady })
-        assertTrue("Auto rows are never tappable", preparing.lines.none { it.tappable })
 
         pipeline.states.value = PipelineState.Ready(listOf(prepared(0), prepared(1)))
         runCurrent()
@@ -487,7 +487,7 @@ class ReaderViewModelTest {
         )
     }
 
-    @Test fun `preparing shows every line with only ready ones enabled`() = runTest {
+    @Test fun `preparing shows every line with only ready ones marked so`() = runTest {
         val vm = readerViewModel(RecordingPlayer(), mode = ReadingMode.Tap)
         pipeline.emit(PipelineState.Preparing(speechUnits(3), preparedUnits(1)))
         advanceUntilIdle()
@@ -495,7 +495,6 @@ class ReaderViewModelTest {
         val lines = (vm.uiState.value as ReaderUiState.Playing).lines
         assertEquals(3, lines.size)
         assertEquals(listOf(true, false, false), lines.map { it.audioReady })
-        assertEquals(listOf(true, false, false), lines.map { it.tappable })
     }
 
     /** F7: a row not yet synthesized must grey in Auto too, not just Tap. */
@@ -506,17 +505,6 @@ class ReaderViewModelTest {
 
         val lines = (vm.uiState.value as ReaderUiState.Playing).lines
         assertEquals(listOf(true, false, false), lines.map { it.audioReady })
-    }
-
-    /** F7: Auto never acts on a tap (onLineTapped ignores it), so no Auto row may be tappable. */
-    @Test fun `an auto-mode row is never tappable, ready or not`() = runTest {
-        val vm = readerViewModel(RecordingPlayer(), mode = ReadingMode.Auto)
-        pipeline.emit(PipelineState.Ready(preparedUnits(2)))
-        advanceUntilIdle()
-
-        val lines = (vm.uiState.value as ReaderUiState.Playing).lines
-        assertTrue(lines.all { it.audioReady })
-        assertTrue("no Auto row may be tappable even once ready", lines.none { it.tappable })
     }
 
     /**
@@ -566,4 +554,53 @@ class ReaderViewModelTest {
             player.played.isEmpty(),
         )
     }
+
+    // --- One unit at a time (Task 7) ------------------------------------------
+
+    @Test fun `starts on the first unit`() = runTest {
+        val vm = readerViewModel(RecordingPlayer(), mode = ReadingMode.Tap)
+        pipeline.emit(PipelineState.Ready(preparedUnits(3), pageImage()))
+        advanceUntilIdle()
+
+        assertEquals(0, (vm.uiState.value as ReaderUiState.Playing).current)
+    }
+
+    @Test fun `next and previous move one unit and stop at the ends`() = runTest {
+        val vm = readerViewModel(RecordingPlayer(), mode = ReadingMode.Tap)
+        pipeline.emit(PipelineState.Ready(preparedUnits(2)))
+        advanceUntilIdle()
+
+        vm.onPrevious()
+        assertEquals("must not go before the first unit", 0, current(vm))
+
+        vm.onNext(); assertEquals(1, current(vm))
+        vm.onNext(); assertEquals("must not go past the last unit", 1, current(vm))
+    }
+
+    @Test fun `tapping the bubble plays the unit on screen`() = runTest {
+        val player = RecordingPlayer()
+        val vm = readerViewModel(player, mode = ReadingMode.Tap)
+        pipeline.emit(PipelineState.Ready(preparedUnits(3)))
+        advanceUntilIdle()
+
+        vm.onNext()
+        vm.onBubbleTapped()
+        advanceUntilIdle()
+
+        assertEquals(listOf(1), player.played.map { it.single().unit.index })
+    }
+
+    @Test fun `auto advances to the unit the player moved to`() = runTest {
+        val player = RecordingPlayer()
+        val vm = readerViewModel(player, mode = ReadingMode.Auto)
+        pipeline.emit(PipelineState.Ready(preparedUnits(3)))
+        advanceUntilIdle()
+
+        player.state.value = PlaybackState.Playing(2)
+        advanceUntilIdle()
+
+        assertEquals(2, current(vm))
+    }
+
+    private fun current(vm: ReaderViewModel) = (vm.uiState.value as ReaderUiState.Playing).current
 }

@@ -139,21 +139,19 @@ private fun Centered(content: @Composable () -> Unit) {
 }
 
 /**
- * Greying (via [ReaderUiState.Line.audioReady]) and tappability (via
- * [ReaderUiState.Line.tappable]) are deliberately separate: a row whose audio
- * is not ready greys in BOTH modes, but only a Tap-mode row is ever clickable.
- * A non-tappable row is genuinely inert, not just faded: clickable(enabled =
- * false) both drops the click handler and removes the row from the
- * accessibility/click tree, so a stray tap - or a screen reader double-tap -
- * on it still cannot fire onTap, and an Auto row never ripples or announces as
- * actionable to TalkBack.
+ * Greying tracks [ReaderUiState.Line.audioReady]: a row whose audio is not
+ * ready greys in BOTH modes.
+ *
+ * Task 7 dropped the per-row `tappable` flag - the reader shows one bubble at
+ * a time now, not a tappable list - so this row is gated on readiness alone
+ * pending Task 8's rewrite of this screen into the bubble-at-a-time view.
  */
 @Composable
 internal fun LineRow(line: ReaderUiState.Line, isPlaying: Boolean, onTap: (Int) -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable(enabled = line.tappable) { onTap(line.index) }
+            .clickable(enabled = line.audioReady) { onTap(line.index) }
             .background(if (isPlaying) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,

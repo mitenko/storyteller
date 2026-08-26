@@ -1,5 +1,7 @@
 package com.storyteller.ui.reader
 
+import com.storyteller.domain.model.BoundingBox
+import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.PlaybackState
 import com.storyteller.domain.model.ReadingMode
 
@@ -15,6 +17,10 @@ sealed interface ReaderUiState {
      */
     data class Playing(
         val lines: List<Line>,
+        /** Which unit is on screen - the reader shows one bubble at a time. */
+        val current: Int,
+        /** The page [lines] were read from; what Task 8's Bubble crops. */
+        val image: PageImage?,
         val playback: PlaybackState,
         val mode: ReadingMode,
         /** The row currently sounding, or null. Tap mode knows it because it handled the tap. */
@@ -26,19 +32,15 @@ sealed interface ReaderUiState {
         val index: Int,
         val speaker: String,
         val text: String,
+        /** The unit's speech-bubble box, or null when the model could not locate one. */
+        val bounds: BoundingBox?,
         /**
          * False until this line's audio has been synthesized - drives the row's
          * greyed-out rendering in BOTH modes. Before F7 this was conflated with
-         * [tappable] under one `enabled` flag, so Auto mode (where every row is
+         * tappability under one `enabled` flag, so Auto mode (where every row is
          * always tappable-in-spirit) never greyed at all and lost its only
          * synthesis-progress indication.
          */
         val audioReady: Boolean,
-        /**
-         * True only in Tap mode, and only once [audioReady]. Auto mode is never
-         * tappable - onLineTapped ignores it there - so an Auto row must not
-         * ripple on touch or announce as actionable to TalkBack.
-         */
-        val tappable: Boolean,
     )
 }

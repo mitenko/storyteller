@@ -24,15 +24,15 @@ class ReaderScreenTest {
     @get:Rule val compose = createComposeRule()
 
     /**
-     * These fixtures only fill the fields Task 8 added (enabled, mode,
-     * playingIndex) with neutral defaults — this file's own tap handling and
-     * highlighting is Task 9's job, not this task's.
+     * These fixtures only fill the fields Task 7 added (bounds, current, image)
+     * with neutral defaults — this file's own tap handling and highlighting is
+     * a later task's job, not this task's.
      */
     private fun line(speaker: String, text: String, index: Int = 0) =
-        ReaderUiState.Line(index, speaker, text, audioReady = true, tappable = true)
+        ReaderUiState.Line(index, speaker, text, bounds = null, audioReady = true)
 
     private fun playing(lines: List<ReaderUiState.Line>, playback: PlaybackState) =
-        ReaderUiState.Playing(lines, playback, ReadingMode.Auto, playingIndex = null)
+        ReaderUiState.Playing(lines, current = 0, image = null, playback, ReadingMode.Auto, playingIndex = null)
 
     @Test fun `the reader is framed with a titled bar`() {
         compose.setContent {
@@ -126,6 +126,8 @@ class ReaderScreenTest {
             ReaderContent(
                 ReaderUiState.Playing(
                     lines = listOf(line("Wolf", "Get away!")),
+                    current = 0,
+                    image = null,
                     playback = PlaybackState.Finished,
                     mode = ReadingMode.Tap,
                     playingIndex = 0,
@@ -183,13 +185,16 @@ class ReaderScreenTest {
         )
     }
 
+    /**
+     * Task 7 dropped the per-row `tappable` flag: a row is gated on readiness
+     * alone until Task 8 rebuilds this screen around a single bubble.
+     */
     private fun lineRowFixture(
         index: Int = 0,
         audioReady: Boolean = true,
-        tappable: Boolean = true,
-    ) = ReaderUiState.Line(index, "Bear", "Hello there", audioReady, tappable)
+    ) = ReaderUiState.Line(index, "Bear", "Hello there", bounds = null, audioReady = audioReady)
 
-    @Test fun `a tappable row reports the index it was given`() {
+    @Test fun `a ready row reports the index it was given`() {
         var tapped: Int? = null
         compose.setContent { LineRow(lineRowFixture(index = 2), isPlaying = false, onTap = { tapped = it }) }
 
@@ -198,31 +203,10 @@ class ReaderScreenTest {
         assertEquals(2, tapped)
     }
 
-    @Test fun `a non-tappable row is inert`() {
+    @Test fun `a row whose audio is not ready is inert`() {
         var tapped: Int? = null
         compose.setContent {
-            LineRow(lineRowFixture(tappable = false), isPlaying = false, onTap = { tapped = it })
-        }
-
-        compose.onNodeWithText("Hello there").performClick()
-
-        assertEquals(null, tapped)
-    }
-
-    /**
-     * F7: an Auto-mode row is never tappable REGARDLESS of readiness -
-     * audioReady and tappable are independent flags now, and this pins that a
-     * ready-but-not-tappable row (what every Auto row looks like) still does
-     * not fire onTap.
-     */
-    @Test fun `a ready but not-tappable row is still inert`() {
-        var tapped: Int? = null
-        compose.setContent {
-            LineRow(
-                lineRowFixture(audioReady = true, tappable = false),
-                isPlaying = false,
-                onTap = { tapped = it },
-            )
+            LineRow(lineRowFixture(audioReady = false), isPlaying = false, onTap = { tapped = it })
         }
 
         compose.onNodeWithText("Hello there").performClick()

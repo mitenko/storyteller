@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.storyteller.domain.ReadingPipeline
 import com.storyteller.domain.model.FailureReason
+import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.PipelineState
 import com.storyteller.domain.model.PlaybackState
 import com.storyteller.domain.model.PreparedUnit
@@ -53,6 +54,9 @@ class ReaderViewModel @Inject constructor(
     /** Whatever units are synthesized so far for the current page; what onLineTapped may play. */
     private var lastReady: List<PreparedUnit> = emptyList()
 
+    /** Which unit is on screen. Bounded at both ends in [moveTo]; reset alongside [queued]. */
+    private var current = 0
+
     init {
         viewModelScope.launch {
             // settings.mode is a Room-backed Flow whose first emission is
@@ -93,11 +97,12 @@ class ReaderViewModel @Inject constructor(
                 // index and must win.
                 if (mode == ReadingMode.Auto && state is PlaybackState.Playing) {
                     playingIndex = state.playlistIndex
+                    current = state.playlistIndex
                 }
                 // Only Playing carries it; the other branches are pipeline-driven
                 // and would be overwritten by the next pipeline emission anyway.
                 (_uiState.value as? ReaderUiState.Playing)?.let {
-                    _uiState.value = it.copy(playback = state, playingIndex = playingIndex)
+                    _uiState.value = it.copy(playback = state, playingIndex = playingIndex, current = current)
                 }
             }
         }
@@ -118,13 +123,14 @@ class ReaderViewModel @Inject constructor(
                 queued = 0
                 lastReady = emptyList()
                 playingIndex = null
+                current = 0
                 _uiState.value = ReaderUiState.ReadingPage
             }
 
             is PipelineState.Preparing -> {
                 if (mode == ReadingMode.Auto) queue(state.ready)
                 lastReady = state.ready
-                _uiState.value = playingState(state.units, state.ready)
+                _uiState.value = playingState(state.units, state.ready, state.image)
             }
 
             is PipelineState.Ready -> {
@@ -143,7 +149,7 @@ class ReaderViewModel @Inject constructor(
                     player.endOfPage()
                 }
                 lastReady = state.units
-                _uiState.value = playingState(state.units.map { it.unit }, state.units)
+                _uiState.value = playingState(state.units.map { it.unit }, state.units, state.image)
             }
 
             is PipelineState.Failed -> {
@@ -165,6 +171,7 @@ class ReaderViewModel @Inject constructor(
                 queued = 0
                 lastReady = emptyList()
                 playingIndex = null
+                current = 0
                 _uiState.value = ReaderUiState.Error(state.reason.message(), state.retryable)
             }
         }
@@ -190,32 +197,61 @@ class ReaderViewModel @Inject constructor(
         queued = ready.size
     }
 
-    /** Every unit renders; only the synthesized ones are tappable. */
+    /**
+     * Every unit renders; only the synthesized ones are marked ready. [current]
+     * is clamped here (not just in [moveTo]) because a page's unit count is only
+     * ever known once this state is built - a shorter page than the one on
+     * screen must not leave a stale index pointing past its last line.
+     */
     private fun playingState(
         all: List<SpeechUnit>,
         ready: List<PreparedUnit>,
+        image: PageImage?,
     ): ReaderUiState.Playing {
+        current = current.coerceIn(0, (all.size - 1).coerceAtLeast(0))
         val readyIndices = ready.mapTo(mutableSetOf()) { it.unit.index }
         return ReaderUiState.Playing(
             lines = all.map { u ->
-                val isReady = u.index in readyIndices
                 ReaderUiState.Line(
                     index = u.index,
                     speaker = u.speaker,
                     text = u.text,
+                    bounds = u.bounds,
                     // Greying tracks readiness alone, in both modes - Auto used to
                     // report every row ready regardless of synthesis progress,
-                    // which lost Auto's only progress indication (F7). Tappability
-                    // is the separate, narrower condition: only Tap mode acts on a
-                    // tap at all (see onLineTapped), and only once ready.
-                    audioReady = isReady,
-                    tappable = mode == ReadingMode.Tap && isReady,
+                    // which lost Auto's only progress indication (F7).
+                    audioReady = u.index in readyIndices,
                 )
             },
+            current = current,
+            image = image,
             playback = playback,
             mode = mode,
             playingIndex = playingIndex,
         )
+    }
+
+    fun onNext() = moveTo(current + 1)
+
+    fun onPrevious() = moveTo(current - 1)
+
+    /** Bounded at both ends: there is no wrap-around, and no unit off the page. */
+    private fun moveTo(index: Int) {
+        val state = _uiState.value as? ReaderUiState.Playing ?: return
+        val bounded = index.coerceIn(0, (state.lines.size - 1).coerceAtLeast(0))
+        if (bounded == current) return
+        current = bounded
+        _uiState.value = state.copy(current = bounded)
+    }
+
+    /** Plays whichever unit is on screen; the one-unit playlist path is unchanged. */
+    fun onBubbleTapped() {
+        if (mode != ReadingMode.Tap) return
+        val prepared = lastReady.firstOrNull { it.unit.index == current } ?: return
+        playingIndex = current
+        player.play(listOf(prepared))
+        player.endOfPage()
+        (_uiState.value as? ReaderUiState.Playing)?.let { _uiState.value = it.copy(playingIndex = current) }
     }
 
     /**
@@ -234,6 +270,7 @@ class ReaderViewModel @Inject constructor(
 
     fun onRetry() {
         queued = 0
+        current = 0
         pipeline.retry()
     }
 
