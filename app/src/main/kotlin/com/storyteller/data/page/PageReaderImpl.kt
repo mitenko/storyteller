@@ -1,6 +1,7 @@
 package com.storyteller.data.page
 
 import android.util.Base64
+import com.storyteller.data.diagnostics.DiagnosticWriter
 import com.storyteller.data.local.PARSE_VERSION
 import com.storyteller.data.local.ParsedPageDao
 import com.storyteller.data.local.ParsedPageEntity
@@ -39,6 +40,7 @@ class PageReaderImpl(
     private val api: ClaudeApi,
     private val parsedPageDao: ParsedPageDao,
     private val json: Json,
+    private val diagnostics: DiagnosticWriter,
 ) : PageReader {
 
     // Deliberately NOT runCatching: it catches Throwable unconditionally and does
@@ -71,7 +73,13 @@ class PageReaderImpl(
         parsedPageDao.upsert(
             ParsedPageEntity(hash, json.encodeToString(page), System.currentTimeMillis(), parseVersion = PARSE_VERSION),
         )
-        return page.toDomain()
+        val parsed = page.toDomain()
+
+        // Recorded here and not on the cache path above: a hit makes no call, so
+        // there is no response to record. `payload` is passed UNTOUCHED - the
+        // clamping in toDomain is exactly the step a diagnostic must see past.
+        diagnostics.record(image, payload, parsed)
+        return parsed
     }
 
     private fun requestBody(image: PageImage): JsonObject = buildJsonObject {

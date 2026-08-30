@@ -39,4 +39,12 @@ object DatabaseModule {
     /** filesDir, not cacheDir: the OS must not be able to purge paid-for audio. */
     @Provides @Singleton @Named("audioDir")
     fun audioDir(@ApplicationContext ctx: Context): File = File(ctx.filesDir, "audio")
+
+    /**
+     * filesDir so a debug build's bundles can be pulled off the device with
+     * `adb exec-out run-as com.storyteller cat ...` without any permission,
+     * network access, or the copyrighted page photographs leaving the cable.
+     */
+    @Provides @Singleton @Named("diagnosticsDir")
+    fun diagnosticsDir(@ApplicationContext ctx: Context): File = File(ctx.filesDir, "diagnostics")
 }

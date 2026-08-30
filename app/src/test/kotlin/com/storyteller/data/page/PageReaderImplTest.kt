@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.storyteller.data.local.StorytellerDatabase
+import com.storyteller.data.diagnostics.DiagnosticWriter
+import com.storyteller.domain.model.ParsedPage
 import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.pageImage
 import kotlinx.coroutines.Dispatchers
@@ -111,7 +113,17 @@ class PageReaderImplTest {
 
     @After fun tearDown() { server.close(); db.close() }
 
-    private fun reader() = PageReaderImpl(api, db.parsedPageDao(), json)
+    private val diagnostics = RecordingDiagnosticWriter()
+
+    private fun reader() = PageReaderImpl(api, db.parsedPageDao(), json, diagnostics)
+
+    /** Records what it was handed so a test can assert the RAW payload reached it. */
+    private class RecordingDiagnosticWriter : DiagnosticWriter {
+        val raw = mutableListOf<String>()
+        override suspend fun record(image: PageImage, rawResponse: String, parsed: ParsedPage) {
+            raw += rawResponse
+        }
+    }
     private fun image(vararg bytes: Byte) = PageImage(bytes, "image/jpeg")
 
     @Test fun `maps response units to indexed speech units`() = runTest {
@@ -229,6 +241,33 @@ class PageReaderImplTest {
 
         assertFalse("characters should no longer be requested", schema.contains("characters"))
         assertFalse("emoji should no longer be requested", schema.contains("emoji"))
+    }
+
+    /**
+     * The diagnostic exists to answer why a bubble crops wrongly, so it must
+     * capture what the MODEL said, not what the client made of it: `toDomain`
+     * clamps coordinates into 0..1, and a bundle recording only the parse would
+     * hide a model emitting 1.36 exactly as the cache did.
+     */
+    @Test fun `records the raw response for diagnosis, before any clamping`() = runTest {
+        val raw = """{"units":[{"speaker":"Wolf","text":"HI","bounds":{"left":0.5,"top":1.08,"right":0.88,"bottom":1.36}}]}"""
+        enqueueTextBlock(raw)
+
+        reader().read(pageImage()).getOrThrow()
+
+        assertEquals(listOf(raw), diagnostics.raw)
+    }
+
+    /** A cache hit makes no call, so there is no response to record and nothing new to learn. */
+    @Test fun `records nothing when the parse came from the cache`() = runTest {
+        enqueueTextBlock("""{"units":[{"speaker":"Wolf","text":"HI","bounds":null}]}""")
+        val image = pageImage()
+        reader().read(image).getOrThrow()
+        diagnostics.raw.clear()
+
+        reader().read(image).getOrThrow()
+
+        assertEquals(emptyList<String>(), diagnostics.raw)
     }
 
     @Test fun `parses a page of units`() = runTest {

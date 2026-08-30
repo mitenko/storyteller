@@ -4,6 +4,9 @@ import android.graphics.Bitmap
 import com.storyteller.data.local.ParsedPageDao
 import com.storyteller.data.local.ParsedPageEntity
 import com.storyteller.data.page.ClaudeApi
+import com.storyteller.data.diagnostics.DiagnosticWriter
+import com.storyteller.domain.model.PageImage
+import com.storyteller.domain.model.ParsedPage
 import com.storyteller.data.page.PageReaderImpl
 import com.storyteller.ui.capture.downscaleToPageImage
 import java.io.ByteArrayOutputStream
@@ -83,7 +86,7 @@ class VisionEvalSelfTest {
         val image = downscaleToPageImage(raw)
         assertTrue("fixture must actually exceed the clamp for this test to mean anything", raw.size > image.bytes.size)
 
-        val units = PageReaderImpl(api, noCache, json).read(image).getOrThrow().units
+        val units = PageReaderImpl(api, noCache, json, NoDiagnostics).read(image).getOrThrow().units
 
         assertEquals(1, units.size)
         assertEquals("Hi", units[0].text)

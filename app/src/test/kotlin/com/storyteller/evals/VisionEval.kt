@@ -3,6 +3,9 @@ package com.storyteller.evals
 import com.storyteller.data.local.ParsedPageDao
 import com.storyteller.data.local.ParsedPageEntity
 import com.storyteller.data.page.ClaudeApi
+import com.storyteller.data.diagnostics.DiagnosticWriter
+import com.storyteller.domain.model.PageImage
+import com.storyteller.domain.model.ParsedPage
 import com.storyteller.data.page.PageReaderImpl
 import com.storyteller.domain.model.BoundingBox
 import com.storyteller.domain.model.SpeechUnit
@@ -236,7 +239,7 @@ class VisionEval {
             .build()
             .create(ClaudeApi::class.java)
 
-        val reader = PageReaderImpl(api, noCache, json)
+        val reader = PageReaderImpl(api, noCache, json, NoDiagnostics)
 
         val rows = mutableListOf<EvalRow>()
         val allBubbleScores = mutableListOf<BubbleScore>()
@@ -304,4 +307,9 @@ class VisionEval {
         }
         println(report)
     }
+}
+
+/** The evals score the model's output; they do not need a diagnostic bundle. */
+internal object NoDiagnostics : DiagnosticWriter {
+    override suspend fun record(image: PageImage, rawResponse: String, parsed: ParsedPage) = Unit
 }
