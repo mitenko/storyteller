@@ -130,12 +130,19 @@ class PageReaderImpl(
             .first { it["type"]?.jsonPrimitive?.content == "text" }["text"]!!
             .jsonPrimitive.content
 
-    private fun BoundsDto.toDomain(): BoundingBox = BoundingBox(
-        left = left.coerceIn(0f, 1f),
-        top = top.coerceIn(0f, 1f),
-        right = right.coerceIn(0f, 1f),
-        bottom = bottom.coerceIn(0f, 1f),
-    )
+    private fun BoundsDto.toDomain(): BoundingBox? {
+        // Coordinates outside 0..1 are invalid. The model was told to return
+        // fractions between 0 and 1; any value outside that range signals a failure
+        // to localise the box correctly. Rather than clamp silently (which collapses
+        // boxes to zero height and hides the problem), reject the box entirely so the
+        // reader falls back to text. This makes model inaccuracy visible for diagnosis.
+        if (left < 0f || left > 1f || top < 0f || top > 1f ||
+            right < 0f || right > 1f || bottom < 0f || bottom > 1f
+        ) {
+            return null
+        }
+        return BoundingBox(left, top, right, bottom)
+    }
 
     private fun PageDto.toDomain(): ParsedPage = ParsedPage(
         units = units.map { u ->

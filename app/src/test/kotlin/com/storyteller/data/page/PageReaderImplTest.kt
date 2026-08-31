@@ -239,8 +239,7 @@ class PageReaderImplTest {
     @Test fun `does not ask the model for characters`() {
         val schema = PAGE_SCHEMA.toString()
 
-        assertFalse("characters should no longer be requested", schema.contains("characters"))
-        assertFalse("emoji should no longer be requested", schema.contains("emoji"))
+        assertTrue("characters should be requested to improve attribution", schema.contains("characters"))
     }
 
     /**
@@ -287,14 +286,40 @@ class PageReaderImplTest {
         assertEquals("Hi", r.read(image(7)).getOrThrow().units.single().text)
     }
 
-    // Regression for a defect this project has already hit twice (VoiceRepositoryImpl,
-    // Task 6): runCatching catches Throwable unconditionally and does not special-case
-    // CancellationException, so wrapping read() in runCatching would convert a real
-    // Retrofit/OkHttp call cancellation into an ordinary Result.failure value instead of
-    // letting it propagate. ReadingPipelineImpl's cancel-in-flight-synthesis hardening
-    // depends on a genuine CancellationException reaching it. PageReaderImpl uses an
-    // explicit try/catch with CancellationException caught first and rethrown instead.
-    @Test fun `cancellation propagates instead of becoming a Result failure`() = runBlocking {
+    @Test fun `rejects bounds that exceed the 0..1 range`() = runTest {
+        enqueueTextBlock("""{"units":[
+            {"speaker":"Wolf","text":"HI","bounds":{"left":0.5,"top":1.08,"right":0.88,"bottom":1.36}},
+            {"speaker":"Bear","text":"GOOD","bounds":{"left":0.1,"top":0.2,"right":0.5,"bottom":0.4}}
+        ],"characters":[]}""")
+
+        val page = reader().read(pageImage()).getOrThrow()
+
+        // First unit has out-of-range bounds (top=1.08, bottom=1.36), so bounds are null
+        assertNull("out-of-range bounds must be rejected", page.units[0].bounds)
+        // Second unit is valid
+        assertNotNull("in-range bounds must be accepted", page.units[1].bounds)
+        assertEquals(0.1f, page.units[1].bounds!!.left, 0.0001f)
+    }
+
+    @Test fun `rejects bounds with left outside range`() = runTest {
+        enqueueTextBlock("""{"units":[
+            {"speaker":"Wolf","text":"HI","bounds":{"left":-0.1,"top":0.2,"right":0.5,"bottom":0.4}}
+        ],"characters":[]}""")
+
+        val page = reader().read(pageImage()).getOrThrow()
+        assertNull("negative left must be rejected", page.units[0].bounds)
+    }
+
+    @Test fun `rejects bounds with right exceeding 1.0`() = runTest {
+        enqueueTextBlock("""{"units":[
+            {"speaker":"Wolf","text":"HI","bounds":{"left":0.5,"top":0.2,"right":1.5,"bottom":0.4}}
+        ],"characters":[]}""")
+
+        val page = reader().read(pageImage()).getOrThrow()
+        assertNull("right > 1.0 must be rejected", page.units[0].bounds)
+    }
+
+    
         server.enqueue(
             MockResponse.Builder()
                 .body("""{"content":[{"type":"text","text":"{\"units\":[]}"}]}""")

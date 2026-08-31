@@ -41,9 +41,20 @@ val PAGE_SCHEMA: JsonObject = Json.parseToJsonElement(
             "required": ["speaker", "text", "bounds"],
             "additionalProperties": false
           }
+        },
+        "characters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" }
+            },
+            "required": ["name"],
+            "additionalProperties": false
+          }
         }
       },
-      "required": ["units"],
+      "required": ["units", "characters"],
       "additionalProperties": false
     }
     """.trimIndent(),
@@ -65,6 +76,10 @@ val PAGE_INSTRUCTION: String = """
     - Set bounds to the box enclosing that unit's speech bubble or text block, as
       fractions of the image between 0 and 1, measured from the top left. Use null
       if you cannot locate it.
+
+    Also return characters: one entry per distinct character who speaks on this
+    page. Do not include the narrator.
+    - Set name to exactly the speaker string you used in units.
 
     Ignore page numbers, running heads, publisher marks, and any text that is part
     of the artwork rather than something to be read aloud.
