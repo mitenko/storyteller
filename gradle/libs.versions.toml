@@ -20,6 +20,7 @@ coroutines = "1.10.2"
 turbine = "1.2.1"
 robolectric = "4.16"
 ksp = "2.2.10-2.0.2"
+mlkitDocumentScanner = "16.0.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -56,6 +57,7 @@ camerax-view = { module = "androidx.camera:camera-view", version.ref = "camerax"
 coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
 turbine = { module = "app.cash.turbine:turbine", version.ref = "turbine" }
 robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
+mlkit-document-scanner = { group = "com.google.android.gms", name = "play-services-mlkit-document-scanner", version.ref = "mlkitDocumentScanner" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
