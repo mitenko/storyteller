@@ -44,7 +44,7 @@ class PageBytesReaderTest {
     @Test fun `a resolver that yields no stream throws`() {
         val unresolvable = Uri.parse("content://com.storyteller.absent/page")
 
-        assertThrows(IOException::class.java) {
+        assertThrows(UnsupportedOperationException::class.java) {
             contentResolverBytesReader(context.contentResolver).read(unresolvable)
         }
     }
