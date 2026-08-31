@@ -83,9 +83,6 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.serialization.json)
     implementation(libs.media3.exoplayer)
-    implementation(libs.camerax.camera2)
-    implementation(libs.camerax.lifecycle)
-    implementation(libs.camerax.view)
     implementation(libs.mlkit.document.scanner)
 
     testImplementation(libs.junit)
