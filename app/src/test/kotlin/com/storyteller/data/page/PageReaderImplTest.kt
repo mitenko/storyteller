@@ -286,7 +286,7 @@ class PageReaderImplTest {
         assertEquals("Hi", r.read(image(7)).getOrThrow().units.single().text)
     }
 
-    @Test fun `rejects bounds that exceed the 0..1 range`() = runTest {
+    @Test fun `rejects bounds that exceed the 0 to 1 range`() = runTest {
         enqueueTextBlock("""{"units":[
             {"speaker":"Wolf","text":"HI","bounds":{"left":0.5,"top":1.08,"right":0.88,"bottom":1.36}},
             {"speaker":"Bear","text":"GOOD","bounds":{"left":0.1,"top":0.2,"right":0.5,"bottom":0.4}}
@@ -310,7 +310,7 @@ class PageReaderImplTest {
         assertNull("negative left must be rejected", page.units[0].bounds)
     }
 
-    @Test fun `rejects bounds with right exceeding 1.0`() = runTest {
+    @Test fun `rejects bounds with right exceeding one`() = runTest {
         enqueueTextBlock("""{"units":[
             {"speaker":"Wolf","text":"HI","bounds":{"left":0.5,"top":0.2,"right":1.5,"bottom":0.4}}
         ],"characters":[]}""")
