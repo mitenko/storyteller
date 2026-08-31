@@ -319,7 +319,7 @@ class PageReaderImplTest {
         assertNull("right > 1.0 must be rejected", page.units[0].bounds)
     }
 
-    
+    @Test fun `cancellation propagates instead of becoming a Result failure`() = runBlocking {
         server.enqueue(
             MockResponse.Builder()
                 .body("""{"content":[{"type":"text","text":"{\"units\":[]}"}]}""")
