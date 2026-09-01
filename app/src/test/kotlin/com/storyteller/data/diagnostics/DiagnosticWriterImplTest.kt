@@ -75,6 +75,20 @@ class DiagnosticWriterImplTest {
         assertEquals(raw, written)
     }
 
+    @Test fun `failed response keeps the page and records the parsing error`() = runTest {
+        val dir = temp.newFolder("diagnostics")
+        val raw = """{"stop_reason":"refusal","content":[]}"""
+
+        writer(dir).recordFailure(pageImage(), raw, IllegalStateException("no text block"))
+
+        val bundle = bundles(dir).single()
+        assertEquals(raw, File(bundle, "response.json").readText())
+        assertEquals("null\n", File(bundle, "parse.json").readText())
+        assertTrue(File(bundle, "page-display.jpg").length() > 0)
+        assertTrue(File(bundle, "page-upload.jpg").length() > 0)
+        assertTrue(File(bundle, "error.txt").readText().contains("no text block"))
+    }
+
     @Test fun `meta records both images' real dimensions`() = runTest {
         val dir = temp.newFolder("diagnostics")
 

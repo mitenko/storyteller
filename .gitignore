@@ -40,3 +40,11 @@ evals/fixtures/
 
 # Cygwin/MSYS crash debris
 *.stackdump
+
+# Diagnostic bundles pulled off the device. These hold photographs of copyrighted
+# book pages and must never be committed - this repository is public. The
+# measurement OUTPUT derived from them is committed instead, under scripts/fixtures.
+diagnostics-pulled/
+
+# Runtime traceback dropped beside a failing script by the repo Python convention.
+scripts/error.txt

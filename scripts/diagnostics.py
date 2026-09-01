@@ -15,10 +15,11 @@ returned box drawn on it and labelled with its unit index and speaker, so
 "comically wrong" becomes a measurable offset instead of an impression.
 
 Boxes are drawn from response.json -- the model's RAW output -- not from
-parse.json, because the client clamps coordinates into 0..1 and a box the model
-placed off the page is exactly the kind of evidence that clamping hides. A box
-that falls outside the page is drawn dashed at the edge it ran past and called
-out in the printed summary.
+parse.json, because the client validates coordinates into the domain model and a
+box the model placed off the page is exactly the kind of evidence that derived
+data can hide. A box that falls outside the page is drawn at the edge it ran
+past and called out in the printed summary. Failed parses can be inspected
+directly in response.json and error.txt; they do not produce an overlay.
 """
 import argparse
 import json
@@ -29,6 +30,7 @@ import sys
 PACKAGE = "com.storyteller"
 REMOTE_DIR = "files/diagnostics"
 FILES = ("page-display.jpg", "page-upload.jpg", "response.json", "parse.json", "meta.json")
+OPTIONAL_FILES = ("error.txt",)
 
 
 def adb(serial, *args, binary=False):
@@ -50,13 +52,24 @@ def pull(serial, out_dir):
     for b in sorted(bundles):
         local = os.path.join(out_dir, b)
         os.makedirs(local, exist_ok=True)
-        for name in FILES:
+        # `adb exec-out run-as ... cat missing` exits 0 and puts the shell's own
+        # "No such file" on stdout, so a missing file cannot be detected from the
+        # exit code -- writing it blind produced an error.txt holding that message
+        # and made a clean bundle look like a failed read. List once instead and
+        # fetch only what is actually there.
+        present = set(adb(serial, "shell", "run-as", PACKAGE, "ls",
+                          "%s/%s" % (REMOTE_DIR, b)).split())
+        for name in FILES + OPTIONAL_FILES:
+            if name not in present:
+                if name in FILES:
+                    print("  %s: MISSING %s" % (b, name))
+                continue
             data = adb(serial, "exec-out", "run-as", PACKAGE, "cat",
                        "%s/%s/%s" % (REMOTE_DIR, b, name), binary=True)
             with open(os.path.join(local, name), "wb") as fh:
                 fh.write(data)
         pulled.append(local)
-        print("pulled %s (%d files)" % (b, len(FILES)))
+        print("pulled %s%s" % (b, "  (failed read)" if "error.txt" in present else ""))
     return pulled
 
 
@@ -64,7 +77,13 @@ def overlay(bundle):
     from PIL import Image, ImageDraw
 
     with open(os.path.join(bundle, "response.json"), encoding="utf-8") as fh:
-        raw = json.load(fh)
+        raw_text = fh.read()
+    try:
+        raw = json.loads(raw_text)
+    except json.JSONDecodeError:
+        print("\n%s  has a non-JSON response; see response.json and error.txt" %
+              os.path.basename(bundle))
+        return None
     img = Image.open(os.path.join(bundle, "page-display.jpg")).convert("RGB")
     w, h = img.size
     draw = ImageDraw.Draw(img)
@@ -100,7 +119,7 @@ def overlay(bundle):
     img.save(out)
     print("  -> %s" % out)
     if outside:
-        print("  !! %d box(es) fall outside 0..1; the app clamps those, which collapses them" % outside)
+        print("  !! %d box(es) fall outside 0..1; the app rejects those for cropping" % outside)
     return out
 
 

@@ -64,9 +64,30 @@ class PageReaderImpl(
             return json.decodeFromString<PageDto>(cached.unitsJson).toDomain()
         }
 
-        val response = api.messages(requestBody(image))
-        val payload = response.textBlock()
-        val page = json.decodeFromString<PageDto>(payload)
+        val response = try {
+            api.messages(requestBody(image))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            diagnostics.recordFailure(image, "", e)
+            throw e
+        }
+        val payload = try {
+            response.textBlock()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            diagnostics.recordFailure(image, response.toString(), e)
+            throw e
+        }
+        val page = try {
+            json.decodeFromString<PageDto>(payload)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            diagnostics.recordFailure(image, payload, e)
+            throw e
+        }
 
         // Cache only successful parses, and cache the normalized payload so a hit
         // and a miss produce identical results.
@@ -76,8 +97,8 @@ class PageReaderImpl(
         val parsed = page.toDomain()
 
         // Recorded here and not on the cache path above: a hit makes no call, so
-        // there is no response to record. `payload` is passed UNTOUCHED - the
-        // clamping in toDomain is exactly the step a diagnostic must see past.
+        // there is no response to record. `payload` is passed UNTOUCHED so the
+        // diagnostic can inspect the model output before domain validation.
         diagnostics.record(image, payload, parsed)
         return parsed
     }

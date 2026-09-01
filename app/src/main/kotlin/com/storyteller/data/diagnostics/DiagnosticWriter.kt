@@ -29,6 +29,8 @@ internal const val MAX_BUNDLES = 20
  */
 interface DiagnosticWriter {
     suspend fun record(image: PageImage, rawResponse: String, parsed: ParsedPage)
+
+    suspend fun recordFailure(image: PageImage, rawResponse: String, error: Throwable) = Unit
 }
 
 /**
@@ -45,7 +47,9 @@ interface DiagnosticWriter {
  *    `bottom: 1.36` until the cache was read by hand. Recording only the parsed
  *    result would conceal that same evidence again.
  *  - `parse.json` — what the app made of that payload, so raw and interpreted
- *    can be diffed against each other.
+ *    can be diffed against each other. Failed reads contain `null` here.
+ *  - `error.txt` — the exception raised while extracting or parsing the response,
+ *    when the bundle was captured from a failed read.
  *  - `meta.json` — both images' real pixel dimensions and the build that
  *    produced them, since normalized bounds mean nothing without the dimensions
  *    they were normalized against.
@@ -57,11 +61,32 @@ interface DiagnosticWriter {
 class DiagnosticWriterImpl(private val root: File) : DiagnosticWriter {
 
     override suspend fun record(image: PageImage, rawResponse: String, parsed: ParsedPage) {
+        recordInternal(image, rawResponse, parsed, null)
+    }
+
+    override suspend fun recordFailure(image: PageImage, rawResponse: String, error: Throwable) {
+        try {
+            withContext(Dispatchers.IO) {
+                recordInternal(image, rawResponse, null, error)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.w(TAG, "could not record a failed diagnostic bundle; the page is unaffected", e)
+        }
+    }
+
+    private suspend fun recordInternal(
+        image: PageImage,
+        rawResponse: String,
+        parsed: ParsedPage?,
+        error: Throwable?,
+    ) {
         // Cancellation is caught first and rethrown, as everywhere in this
         // codebase: a cancelled read must stay cancelled rather than being
         // converted into a silently-swallowed diagnostic failure.
         try {
-            withContext(Dispatchers.IO) { write(image, rawResponse, parsed) }
+            withContext(Dispatchers.IO) { write(image, rawResponse, parsed, error) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
@@ -69,14 +94,19 @@ class DiagnosticWriterImpl(private val root: File) : DiagnosticWriter {
         }
     }
 
-    private fun write(image: PageImage, rawResponse: String, parsed: ParsedPage) {
+    private fun write(image: PageImage, rawResponse: String, parsed: ParsedPage?, error: Throwable? = null) {
         root.mkdirs()
         val bundle = File(root, stamp()).apply { mkdirs() }
 
         File(bundle, "page-display.jpg").writeBytes(image.displayBytes)
         File(bundle, "page-upload.jpg").writeBytes(image.bytes)
         File(bundle, "response.json").writeText(rawResponse)
-        File(bundle, "parse.json").writeText(parseJson(parsed))
+        File(bundle, "parse.json").writeText(parsed?.let(::parseJson) ?: "null\n")
+        if (error != null) {
+            File(bundle, "error.txt").writeText(
+                "${error::class.qualifiedName}: ${error.message ?: "(no message)"}\n",
+            )
+        }
         File(bundle, "meta.json").writeText(metaJson(image))
 
         prune()
