@@ -1,0 +1,293 @@
+# Bubble-box accuracy: the measurement
+
+**Status:** measured. The open question in
+[`2026-08-31-bubble-crops-are-wrong.md`](2026-08-31-bubble-crops-are-wrong.md) §3
+is now closed, and the answer is the bad one.
+**Date:** 2026-08-31
+**Verdict:** mean IoU **0.007** against a stop condition of 0.5. The boxes are not
+usable and cannot be made usable by prompt work.
+
+---
+
+## 1. What was done
+
+The companion document said the cheapest available instrument had never been
+used: photograph a page, pull the bundle, compare a returned box against where
+its bubble actually is. That measurement has now been taken.
+
+One graphic-novel page was photographed on a Pixel 9a with a debug build, and the
+diagnostic bundle pulled with `python scripts/diagnostics.py pull`
+(bundle `page-1788205074358`, display 3000x4000, upload 1176x1568).
+
+**Ground truth came from OCR**, not from eyeballing. Windows' built-in
+`Windows.Media.Ocr` engine — present on the machine, no install, fully offline,
+so the copyrighted page still never leaves the box — was run over
+`page-upload.jpg`, **the exact pixels the model saw**. It returned 38 words with
+per-word bounding boxes. Words were grouped into speech units and each group's
+extent taken as the true location of that unit's text.
+
+Six of the eight units could be anchored this way. The hand-lettered comic face
+defeats OCR on "ERGH!" and garbles others ("DUNCAN." reads as "DQNCAN.",
+"PRISON." as "P219N."), but a garbled word is still *located*, which is all the
+measurement needs.
+
+Scripts used are throwaway and not committed; the numbers below are reproducible
+from the bundle plus the OCR JSON.
+
+## 2. The numbers
+
+Model box (from `response.json`, before any clamping) against OCR text extent,
+both normalised to the uploaded image:
+
+| unit | text | true text extent | model box | centre error |
+|---|---|---|---|---|
+| 0 | LET US GO!! | (0.584,0.170)-(0.634,0.183) | (0.650,0.120)-(0.950,0.220) | dx **+0.191** dy -0.006 |
+| 3 | BUY ME MORE TIME, DUNCAN... | (0.278,0.357)-(0.389,0.445) | (0.420,0.350)-(0.750,0.550) | dx **+0.251** dy +0.049 |
+| 4 | ALY, BEFORE WE GO ANY... | (0.241,0.534)-(0.379,0.650) | (0.080,0.620)-(0.500,0.820) | dx -0.020 dy +0.128 |
+| 5 | THE PRISON'S WHAT YOU'RE... | (0.548,0.508)-(0.630,0.563) | (0.500,0.620)-(0.920,0.750) | dx +0.121 dy +0.149 |
+| 6 | WHY WOULD YOU WANT TO... | (0.581,0.592)-(0.675,0.605) | (0.500,0.750)-(0.920,0.880) | dx +0.082 dy **+0.216** |
+| 7 | BECAUSE WE'RE GOING TO... | (0.564,0.718)-(0.656,0.782) | (0.500,0.880)-(0.920,1.000) | dx +0.100 dy +0.190 |
+
+**Centre error:** dx mean **+0.121** (sd 0.085), dy mean **+0.121** (sd 0.078).
+On the 3000x4000 display copy that is roughly **360 px right and 480 px down**.
+
+**Size:** model boxes run **3.0x to 6.0x** the text extent in width and 1.7x to
+10.7x in height. Allowing that a balloon is perhaps 1.3-1.6x its text, the boxes
+are still on the order of **2-4x too large**.
+
+**IoU**, the number the bubble-reader spec named as its stop condition:
+
+| compared against | per-unit IoU | mean |
+|---|---|---|
+| OCR text extent | 0.00 0.00 0.04 0.00 0.00 0.00 | **0.007** |
+| text +30% (balloon estimate) | 0.00 0.00 0.08 0.00 0.00 0.00 | **0.014** |
+| text +60% (generous) | 0.00 0.00 0.13 0.00 0.00 0.00 | **0.022** |
+
+Five of six boxes have **zero overlap with their own text** under every
+assumption about balloon padding. The spec's stop condition is not marginally
+missed; it is missed by two orders of magnitude.
+
+## 3. The structure of the error
+
+The errors are not random. Fitting a single affine map from model coordinate to
+true coordinate, independently per axis:
+
+```
+x:  true = 0.703 * model + 0.068     R2 = 0.737
+y:  true = 0.707 * model + 0.063     R2 = 0.984
+```
+
+Both axes produce **the same slope, ~0.70, and the same intercept, ~0.065**. The
+model's output is a uniform **~1.43x expansion of reality** about a point near
+0.22.
+
+The y fit at **R2 = 0.984** is the important one. Vertical *ordering and relative
+spacing are near-perfect* — the model knows exactly which unit follows which and
+roughly how far apart they sit — but the entire sequence is stretched to fill the
+full 0..1 range. x fits far worse (R2 = 0.737) because horizontal position
+carries much less ordering information to infer from.
+
+That is the signature of a model **composing a plausible layout in reading
+order**, not measuring one. Three further details agree:
+
+- Every coordinate is a round multiple of 0.01-0.05.
+- Units 5, 6 and 7 tile a single column exactly edge to edge — 0.62 -> 0.75 ->
+  0.88 -> 1.00 — with identical left and right values on all three.
+- The final box terminates at precisely 1.000, the frame edge.
+
+The earlier document was right to say that 0.01 quantisation alone does not prove
+fabrication (§3, "quantisation is not inaccuracy"). That caution was correct and
+is now superseded by direct measurement: the granularity was weak evidence, but
+the offsets are conclusive.
+
+## 4. What this rules in and out
+
+**Not a bug in this codebase.** The boxes above are read straight from
+`response.json`, before `PageReaderImpl` clamps anything. `Downscale.kt:72` only
+scales and rotates; it never crops, so display and upload share identical
+framing. The companion document's §2 exclusions all still hold — and now the
+remaining candidate is the model itself.
+
+**~~Not fixable by prompt wording.~~ CORRECTED 2026-08-31 — this claim was wrong.**
+
+> The original text read: *"Haiku 4.5 has no grounding or detection head. Asked
+> for normalised boxes it returns confident round numbers. There is no phrasing
+> of `PAGE_INSTRUCTION` that turns a language model into a detector."*
+>
+> Anthropic's coordinate documentation contradicts it directly. Claude supports a
+> bounding-box workflow, and the documentation names **the format this app uses**
+> as the one that does not work:
+>
+> > "Claude works best with absolute pixel coordinates. Ask for them explicitly
+> > in your prompt. ... Claude does not work well when you ask for normalized
+> > coordinates."
+> > — <https://platform.claude.com/docs/en/build-with-claude/vision-coordinates>
+>
+> `PAGE_INSTRUCTION` (`PageSchema.kt:76`) asks for "fractions of the image
+> between 0 and 1". Every measurement in this document was taken through the
+> documented-bad protocol. The conclusion "the model cannot localise" was drawn
+> without ever asking it the documented way.
+>
+> This does not invalidate the measurements — the boxes really were that wrong —
+> but it invalidates the inference drawn from them, and it reorders §6: the
+> protocol fix is now the first thing to try, not the OCR split.
+
+**A real but secondary contributor: the frame is mostly not the page.** The
+prompt says bounds are fractions "of the image" (`PageSchema.kt:76`), and in this
+photograph the page spans only x 0.18-0.93, y 0.09-0.96 — roughly a third of the
+frame is desk, facing page and background. This makes the task harder, but it is
+not the explanation: a page-relative normalisation would fit slope 0.77/0.87 and
+intercept 0.18/0.09, and the observed fit is 0.70/0.065.
+
+## 5. What the model did get right
+
+Worth recording precisely, because it constrains the fix. On this page the vision
+call produced:
+
+- **All eight speech units, no omissions**, covering every line of dialogue.
+- **Verbatim text**, correct down to punctuation.
+- **Correct reading order.**
+- **Correct speaker attribution**, naming Duncan and Aly from context — confirming
+  that restoring character enumeration (commit `bfc40d9`) fixed the regression
+  recorded in the companion document §5.
+
+The one thing it cannot do is say *where* anything is.
+
+Its grouping of joined balloon lobes is inconsistent but defensible: it merged the
+"ALY," lobe with the balloon below it into one unit, and split the
+"THE PRISON'S.../WHY WOULD YOU..." pair into two, though both are the same
+drawing convention. For a read-aloud app that is a pacing difference, not an
+error.
+
+## 6. Consequence for the design
+
+`docs/PROJECT.md` records the decision as: *"No ML Kit: the vision call sees the
+page layout, which is what makes speech bubbles in comics work."* The measurement
+splits that claim in half. The vision call **does** read the page layout well
+enough to order the units and attribute the speakers. It **does not** produce
+coordinates, and no amount of prompt work will change that.
+
+So the two jobs should be taken by two mechanisms:
+
+- **Localisation** from something that reads pixels — on-device text recognition,
+  or balloon detection — which is exactly what OCR just demonstrated at zero cost.
+- **Text, order and attribution** from the vision call, which is already correct.
+- **Joined on text**, since both sides produce it.
+
+This reverses a documented decision and is a design change, not a bug fix. It is
+recorded here for that decision to be taken deliberately.
+
+## 7. Immediate, independent of that decision
+
+1. **Crop to the page before upload.** Removes the desk and facing page, and cuts
+   a third of the frame that the model currently has to reason around. Worth
+   doing under either design.
+2. **Fix `scripts/diagnostics.py`.** A missing optional file is treated as
+   success: `adb exec-out run-as ... cat <missing>` exits **0** with the shell's
+   error on stdout, so the puller writes an `error.txt` containing
+   `cat: ...: No such file or directory`, making a clean bundle look like a failed
+   read. Observed on this very bundle.
+
+## 8. Method note
+
+The natural instinct was to detect the balloons with OpenCV and compare against
+those. That was tried and abandoned: the white page margin, the gutters and the
+lit desk form one connected bright region, so `RETR_EXTERNAL` discards the
+balloons as interior holes, and `RETR_LIST` with the thresholds tuned to the
+balloons returns the *panels* instead. OCR word boxes turned out to be both more
+precise and far cheaper. The text extent understates the balloon, which is why
+IoU is reported at three padding assumptions above rather than one.
+
+## 9. Follow-up diagnostic: latest pulled bundle
+
+The next fresh device capture was pulled to
+`diagnostics-pulled/page-1788215961215`. It reproduces the same failure and
+rules out a one-off bad page or an orientation mismatch.
+
+### Capture geometry
+
+| Image | Dimensions |
+|---|---:|
+| `page-upload.jpg` sent to the model | 1021 x 1568 |
+| `page-display.jpg` used for cropping | 2439 x 3745 |
+
+The aspect ratios differ by less than 0.01%, and both images are upright. The
+display/upload relationship therefore preserves normalized coordinates; the
+crop path is not introducing the observed displacement.
+
+The model transcription is again essentially complete and correct:
+
+- all eight speech units are present;
+- reading order is correct;
+- wording and punctuation are correct;
+- `Duncan` and `Aly` are identified, confirming that character enumeration
+  restored attribution.
+
+The spatial output remains a coarse layout guess. For example, the model places
+`LET US GO!!` at `(0.65, 0.18)-(0.95, 0.28)`, while the visible bubble is near
+the upper-center of the page at approximately `(0.59, 0.02)-(0.74, 0.13)`.
+The `THEY KNOW, SIR.` and `BUY ME MORE TIME...` rectangles are also shifted
+down/right into neighboring artwork. The lower-right units are emitted as
+large, adjacent column tiles rather than tight boxes around their balloons.
+
+The error pattern is not a constant affine transform: boxes are oversized,
+several have zero overlap with their own text, and boundaries are reused or
+aligned to panel-like regions. This is consistent with the earlier measured
+signature: the model knows the unit sequence but is not measuring pixel
+boundaries.
+
+## 10. Relevant vendor guidance
+
+Anthropic's current coordinate documentation confirms that this use is a known
+weak point:
+
+<https://platform.claude.com/docs/en/build-with-claude/vision-coordinates>
+
+The documentation says:
+
+- Claude works best with **absolute pixel coordinates**;
+- normalized coordinates such as values between 0 and 1000 do not work well;
+- returned coordinates refer to the resized image Claude actually sees;
+- images may be resized due to both edge limits and visual-token limits;
+- images are padded to multiples of 28 pixels after resizing;
+- the reliable approaches are to pre-resize to the expected dimensions or
+  rescale returned pixel coordinates using the actual resized dimensions;
+- for small/fine targets, crop a region of interest or use a higher-resolution
+  model.
+
+This guidance identifies two protocol weaknesses in the current implementation:
+
+1. `PAGE_INSTRUCTION` requests normalized fractions rather than absolute pixel
+   coordinates.
+2. The app uploads a 1021 x 1568 image without accounting for the standard-tier
+   visual-token resize. Using the documented resize calculation, that image is
+   reduced to approximately 893 x 1371 before model processing.
+
+Those weaknesses can add conversion uncertainty, but they do **not** explain
+the latest result by themselves. A uniform aspect-preserving resize cancels
+when coordinates are normalized, while the overlay shows large, non-uniform
+semantic errors. Switching to absolute pixel coordinates is still the cheapest
+controlled prompt/protocol experiment, but it should not be mistaken for a
+likely complete fix.
+
+## 11. Conclusion and recommended direction
+
+The latest capture confirms the original conclusion: the vision call is a good
+transcriber and weak localizer. The rectangle problem is not caused by
+`cropRect`, the two image copies, orientation, or the scanner/capture geometry.
+It is a limitation of asking a general vision-language model to produce precise
+boxes for small stylized comic balloons.
+
+The next implementation should separate the jobs:
+
+- use local OCR or another pixel-grounded detector for text/bubble
+  localization;
+- continue using the vision call for transcription, reading order and speaker
+  attribution;
+- join localization results to vision units using normalized text, with a
+  documented strategy for punctuation, OCR errors and multi-lobe balloons.
+
+Before committing to that split, one isolated experiment is worthwhile: request
+absolute pixel boxes in a fresh call and record the model-seen dimensions. If
+that result remains poor, stop prompt tuning and proceed with the OCR/localizer
+design.

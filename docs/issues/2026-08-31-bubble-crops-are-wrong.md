@@ -1,6 +1,9 @@
 # Speech-bubble crops are wrong
 
-**Status:** open, under investigation. Diagnostic capture built; measurement not yet taken.
+**Status:** measurement taken 2026-08-31 - see
+[`2026-08-31-bubble-box-accuracy-measured.md`](2026-08-31-bubble-box-accuracy-measured.md).
+The boxes are inaccurate: mean IoU **0.007** against a stop condition of 0.5.
+Sections 3 and 7 below are superseded where marked.
 **Date raised:** 2026-08-30
 **Severity:** blocks the bubble reader. Cropping the bubble is the feature.
 
@@ -55,6 +58,14 @@ Each of these was checked by reading the code, not assumed:
 - **The prompt's stated convention.** It matches what `cropRect` assumes.
 
 ## 3. What is NOT established
+
+> **Superseded 2026-08-31.** All three items below have since been settled by
+> direct measurement against OCR ground truth; see
+> [`2026-08-31-bubble-box-accuracy-measured.md`](2026-08-31-bubble-box-accuracy-measured.md).
+> The in-range boxes **are** inaccurate (mean IoU 0.007, centre error +0.12 of
+> the frame in both axes). The caution about quantisation was correct on its own
+> evidence and is simply overtaken by better evidence. Prompt iteration is no
+> longer worth attempting: the model has no grounding head.
 
 **That the in-range boxes are inaccurate.** An earlier claim that the model is
 "fabricating" boxes was inferred from the 0.01 granularity, and that inference
@@ -143,6 +154,12 @@ The page photographs are copyrighted book pages and never leave the machine.
 **Note:** parses already cached produce no bundle. Photograph a page fresh.
 
 ## 7. Next steps, in order
+
+> **Superseded 2026-08-31.** Step 1 is done. Step 2 is done (`bfc40d9`) and
+> confirmed working - the latest page named Duncan and Aly correctly. Step 3
+> should be struck: prompt wording cannot make the model localise. Step 4 is now
+> live, and the recommendation is in
+> [`2026-08-31-bubble-box-accuracy-measured.md`](2026-08-31-bubble-box-accuracy-measured.md) §6.
 
 1. **Take one overlay.** Photograph a graphic-novel page, pull the bundle, look
    at `overlay.png`. This replaces both the "comically wrong" impression and the
