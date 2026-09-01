@@ -14,7 +14,13 @@ import java.io.File
 fun speechUnit(index: Int, speaker: String = "Wolf", text: String = "line $index") =
     SpeechUnit(index = index, speaker = speaker, text = text, bounds = null)
 
-fun pageImage() = PageImage(byteArrayOf(1, 2, 3), "image/jpeg")
+/**
+ * The bytes are not a decodable JPEG and do not need to be — nothing in the read
+ * path decodes them. The dimensions are what matters: they are the coordinate
+ * space the model's pixel bounds are normalised against, so they are stated here
+ * rather than derived. 893x1372 is what a scanner page actually uploads at.
+ */
+fun pageImage() = PageImage(byteArrayOf(1, 2, 3), "image/jpeg", width = 893, height = 1372)
 
 /**
  * Takes a plain `List<SpeechUnit>` result, not `ParsedPage`, so the many

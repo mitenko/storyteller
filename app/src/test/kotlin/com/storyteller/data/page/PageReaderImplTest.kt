@@ -3,8 +3,10 @@ package com.storyteller.data.page
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import com.storyteller.data.local.ParsedPageEntity
 import com.storyteller.data.local.StorytellerDatabase
 import com.storyteller.data.diagnostics.DiagnosticWriter
+import com.storyteller.data.sha256
 import com.storyteller.domain.model.ParsedPage
 import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.pageImage
@@ -124,14 +126,14 @@ class PageReaderImplTest {
             raw += rawResponse
         }
     }
-    private fun image(vararg bytes: Byte) = PageImage(bytes, "image/jpeg")
+    private fun image(vararg bytes: Byte) = PageImage(bytes, "image/jpeg", width = 893, height = 1372)
 
     @Test fun `maps response units to indexed speech units`() = runTest {
         server.enqueue(
             okResponse(
                 """[
                   {"speaker":"Narrator","text":"Once upon a time,","bounds":null},
-                  {"speaker":"Wolf","text":"Get away!","bounds":{"left":0.1,"top":0.2,"right":0.5,"bottom":0.4}}
+                  {"speaker":"Wolf","text":"Get away!","bounds":{"x1":89.3,"y1":274.4,"x2":446.5,"y2":548.8}}
                 ]""",
             ),
         )
@@ -218,7 +220,7 @@ class PageReaderImplTest {
             okResponse(
                 """[
                   {"speaker":"Narrator","text":"Once upon a time,","bounds":null},
-                  {"speaker":"Wolf","text":"Get away!","bounds":{"left":0.1,"top":0.2,"right":0.5,"bottom":0.4}}
+                  {"speaker":"Wolf","text":"Get away!","bounds":{"x1":89.3,"y1":274.4,"x2":446.5,"y2":548.8}}
                 ]""",
             ),
         )
@@ -245,11 +247,11 @@ class PageReaderImplTest {
     /**
      * The diagnostic exists to answer why a bubble crops wrongly, so it must
      * capture what the MODEL said, not what the client made of it: `toDomain`
-     * clamps coordinates into 0..1, and a bundle recording only the parse would
-     * hide a model emitting 1.36 exactly as the cache did.
+     * rejects a box that falls outside the image, and a bundle recording only the
+     * parse would hide where the model actually put it.
      */
     @Test fun `records the raw response for diagnosis, before any clamping`() = runTest {
-        val raw = """{"units":[{"speaker":"Wolf","text":"HI","bounds":{"left":0.5,"top":1.08,"right":0.88,"bottom":1.36}}]}"""
+        val raw = """{"units":[{"speaker":"Wolf","text":"HI","bounds":{"x1":446.5,"y1":1481.76,"x2":785.84,"y2":1865.92}}]}"""
         enqueueTextBlock(raw)
 
         reader().read(pageImage()).getOrThrow()
@@ -286,37 +288,37 @@ class PageReaderImplTest {
         assertEquals("Hi", r.read(image(7)).getOrThrow().units.single().text)
     }
 
-    @Test fun `rejects bounds that exceed the 0 to 1 range`() = runTest {
+    @Test fun `rejects bounds that fall outside the uploaded image`() = runTest {
         enqueueTextBlock("""{"units":[
-            {"speaker":"Wolf","text":"HI","bounds":{"left":0.5,"top":1.08,"right":0.88,"bottom":1.36}},
-            {"speaker":"Bear","text":"GOOD","bounds":{"left":0.1,"top":0.2,"right":0.5,"bottom":0.4}}
+            {"speaker":"Wolf","text":"HI","bounds":{"x1":446.5,"y1":1481.76,"x2":785.84,"y2":1865.92}},
+            {"speaker":"Bear","text":"GOOD","bounds":{"x1":89.3,"y1":274.4,"x2":446.5,"y2":548.8}}
         ],"characters":[]}""")
 
         val page = reader().read(pageImage()).getOrThrow()
 
-        // First unit has out-of-range bounds (top=1.08, bottom=1.36), so bounds are null
-        assertNull("out-of-range bounds must be rejected", page.units[0].bounds)
+        // First unit runs off the bottom of a 1372px-tall image, so bounds are null
+        assertNull("a box outside the image must be rejected", page.units[0].bounds)
         // Second unit is valid
-        assertNotNull("in-range bounds must be accepted", page.units[1].bounds)
+        assertNotNull("a box inside the image must be accepted", page.units[1].bounds)
         assertEquals(0.1f, page.units[1].bounds!!.left, 0.0001f)
     }
 
-    @Test fun `rejects bounds with left outside range`() = runTest {
+    @Test fun `rejects bounds with a negative origin`() = runTest {
         enqueueTextBlock("""{"units":[
-            {"speaker":"Wolf","text":"HI","bounds":{"left":-0.1,"top":0.2,"right":0.5,"bottom":0.4}}
+            {"speaker":"Wolf","text":"HI","bounds":{"x1":-89.3,"y1":274.4,"x2":446.5,"y2":548.8}}
         ],"characters":[]}""")
 
         val page = reader().read(pageImage()).getOrThrow()
-        assertNull("negative left must be rejected", page.units[0].bounds)
+        assertNull("a negative pixel coordinate must be rejected", page.units[0].bounds)
     }
 
-    @Test fun `rejects bounds with right exceeding one`() = runTest {
+    @Test fun `rejects bounds wider than the uploaded image`() = runTest {
         enqueueTextBlock("""{"units":[
-            {"speaker":"Wolf","text":"HI","bounds":{"left":0.5,"top":0.2,"right":1.5,"bottom":0.4}}
+            {"speaker":"Wolf","text":"HI","bounds":{"x1":446.5,"y1":274.4,"x2":1339.5,"y2":548.8}}
         ],"characters":[]}""")
 
         val page = reader().read(pageImage()).getOrThrow()
-        assertNull("right > 1.0 must be rejected", page.units[0].bounds)
+        assertNull("a box wider than the image must be rejected", page.units[0].bounds)
     }
 
     @Test fun `cancellation propagates instead of becoming a Result failure`() = runBlocking {
@@ -337,5 +339,113 @@ class PageReaderImplTest {
         withTimeout(5_000) { job.cancelAndJoin() }
         assertTrue(job.isCancelled)
         assertNull("cancellation must propagate, not resolve to a Result", result)
+    }
+
+    // ---- Parse v5: absolute pixel coordinates ----------------------------------
+    // pageImage() is 893x1372, so every expected fraction below is exact.
+
+    @Test fun `pixel bounds are normalised against the uploaded image`() = runTest {
+        enqueueTextBlock("""{"units":[
+            {"speaker":"Wolf","text":"HI","bounds":{"x1":0,"y1":0,"x2":893,"y2":1372}}
+        ],"characters":[]}""")
+
+        val b = reader().read(pageImage()).getOrThrow().units[0].bounds!!
+        assertEquals(0f, b.left, 0.0001f)
+        assertEquals(0f, b.top, 0.0001f)
+        assertEquals(1f, b.right, 0.0001f)
+        assertEquals(1f, b.bottom, 0.0001f)
+    }
+
+    @Test fun `a mid-page pixel box divides by the uploaded dimensions`() = runTest {
+        enqueueTextBlock("""{"units":[
+            {"speaker":"Wolf","text":"HI","bounds":{"x1":223.25,"y1":343,"x2":669.75,"y2":1029}}
+        ],"characters":[]}""")
+
+        val b = reader().read(pageImage()).getOrThrow().units[0].bounds!!
+        assertEquals(0.25f, b.left, 0.0001f)
+        assertEquals(0.25f, b.top, 0.0001f)
+        assertEquals(0.75f, b.right, 0.0001f)
+        assertEquals(0.75f, b.bottom, 0.0001f)
+    }
+
+    @Test fun `an inverted box is rejected`() = runTest {
+        enqueueTextBlock("""{"units":[
+            {"speaker":"Wolf","text":"HI","bounds":{"x1":100,"y1":0,"x2":10,"y2":50}}
+        ],"characters":[]}""")
+        assertNull(reader().read(pageImage()).getOrThrow().units[0].bounds)
+    }
+
+    @Test fun `a zero-area box is rejected`() = runTest {
+        enqueueTextBlock("""{"units":[
+            {"speaker":"Wolf","text":"HI","bounds":{"x1":100,"y1":50,"x2":100,"y2":50}}
+        ],"characters":[]}""")
+        assertNull(reader().read(pageImage()).getOrThrow().units[0].bounds)
+    }
+
+    /**
+     * A non-finite coordinate never reaches the domain: kotlinx refuses to
+     * deserialize one unless allowSpecialFloatingPointValues is set, which neither
+     * this test's Json nor NetworkModule's enables. So an overflowing exponent
+     * fails the whole read rather than yielding a null box.
+     *
+     * Pinned because the distinction matters if anyone ever turns that flag on.
+     * toDomain keeps its own isFinite guard for that case - NaN is false against
+     * every comparison, so it would otherwise pass validation intact.
+     */
+    @Test fun `a non-finite coordinate fails the read rather than reaching the domain`() = runTest {
+        enqueueTextBlock("""{"units":[
+            {"speaker":"Wolf","text":"HI","bounds":{"x1":0,"y1":0,"x2":1e40,"y2":50}}
+        ],"characters":[]}""")
+        assertTrue("a non-finite coordinate must not parse", reader().read(pageImage()).isFailure)
+    }
+
+    /**
+     * An image with no dimensions is OUR bug, not model inaccuracy, and must not be
+     * mistaken for it: silently rejecting every box would look exactly like the
+     * failure this whole iteration is trying to measure.
+     */
+    @Test fun `an image with no dimensions fails the read loudly`() = runTest {
+        enqueueTextBlock("""{"units":[],"characters":[]}""")
+        val result = reader().read(PageImage(byteArrayOf(1, 2, 3), "image/jpeg"))
+        assertTrue("expected a failed read", result.isFailure)
+    }
+
+    @Test fun `the prompt states the image dimensions in pixels`() {
+        val instruction = pageInstruction(893, 1372)
+        assertTrue(instruction.contains("893"))
+        assertTrue(instruction.contains("1372"))
+        assertTrue("must ask for pixels", instruction.contains("pixel", ignoreCase = true))
+        assertFalse(
+            "must not still ask for fractions",
+            instruction.contains("fraction", ignoreCase = true),
+        )
+    }
+
+    @Test fun `the request marks oversized images as an error rather than resizing`() = runTest {
+        enqueueTextBlock("""{"units":[],"characters":[]}""")
+        reader().read(pageImage())
+        val body = server.takeRequest()!!.body!!.utf8()
+        assertTrue(body.contains("oversized_image"))
+        assertTrue(body.contains("\"error\""))
+    }
+
+    /**
+     * A page cached under the old fraction protocol must not be served to the new
+     * one: v4 rows hold numbers in a different unit entirely.
+     */
+    @Test fun `a v4 cached parse is not reused under v5`() = runTest {
+        val img = pageImage()
+        db.parsedPageDao().upsert(
+            ParsedPageEntity(
+                sha256(img.bytes),
+                """{"units":[{"speaker":"Stale","text":"OLD","bounds":null}]}""",
+                System.currentTimeMillis(),
+                parseVersion = 4,
+            ),
+        )
+        enqueueTextBlock("""{"units":[{"speaker":"Fresh","text":"NEW","bounds":null}],"characters":[]}""")
+
+        val page = reader().read(img).getOrThrow()
+        assertEquals("Fresh", page.units[0].speaker)
     }
 }

@@ -28,7 +28,7 @@ private const val MODEL = "claude-haiku-4-5"
 private const val MAX_TOKENS = 2048
 
 @Serializable
-private data class BoundsDto(val left: Float, val top: Float, val right: Float, val bottom: Float)
+private data class BoundsDto(val x1: Float, val y1: Float, val x2: Float, val y2: Float)
 
 @Serializable
 private data class UnitDto(val speaker: String, val text: String, val bounds: BoundsDto?)
@@ -58,10 +58,20 @@ class PageReaderImpl(
     }
 
     private suspend fun readOrThrow(image: PageImage): ParsedPage {
+        // The loud half of reject-don't-clamp. An image with no dimensions is OUR
+        // bug, not model inaccuracy: without them the pixel bounds cannot be
+        // normalised, and silently rejecting every box would look exactly like the
+        // localisation failure this protocol exists to fix.
+        require(image.width > 0 && image.height > 0) {
+            "PageImage reached the vision call with no dimensions " +
+                "(${image.width}x${image.height}); the pixel bounds the model " +
+                "returns cannot be normalised without them"
+        }
+
         val hash = sha256(image.bytes)
 
         parsedPageDao.findCurrent(hash, PARSE_VERSION)?.let { cached ->
-            return json.decodeFromString<PageDto>(cached.unitsJson).toDomain()
+            return json.decodeFromString<PageDto>(cached.unitsJson).toDomain(image.width, image.height)
         }
 
         val response = try {
@@ -94,7 +104,7 @@ class PageReaderImpl(
         parsedPageDao.upsert(
             ParsedPageEntity(hash, json.encodeToString(page), System.currentTimeMillis(), parseVersion = PARSE_VERSION),
         )
-        val parsed = page.toDomain()
+        val parsed = page.toDomain(image.width, image.height)
 
         // Recorded here and not on the cache path above: a hit makes no call, so
         // there is no response to record. `payload` is passed UNTOUCHED so the
@@ -130,12 +140,20 @@ class PageReaderImpl(
                                         Base64.encodeToString(image.bytes, Base64.NO_WRAP),
                                     )
                                 }
+                                putJsonObject("transformations") {
+                                    // Downscale already sized these bytes to what
+                                    // Claude sees. A server-side resize would move
+                                    // every pixel coordinate we get back, so fail
+                                    // loudly instead: the 400 names the image's
+                                    // dimensions and the largest that would fit.
+                                    put("oversized_image", "error")
+                                }
                             },
                         )
                         add(
                             buildJsonObject {
                                 put("type", "text")
-                                put("text", PAGE_INSTRUCTION)
+                                put("text", pageInstruction(image.width, image.height))
                             },
                         )
                     }
@@ -151,23 +169,29 @@ class PageReaderImpl(
             .first { it["type"]?.jsonPrimitive?.content == "text" }["text"]!!
             .jsonPrimitive.content
 
-    private fun BoundsDto.toDomain(): BoundingBox? {
-        // Coordinates outside 0..1 are invalid. The model was told to return
-        // fractions between 0 and 1; any value outside that range signals a failure
-        // to localise the box correctly. Rather than clamp silently (which collapses
-        // boxes to zero height and hides the problem), reject the box entirely so the
-        // reader falls back to text. This makes model inaccuracy visible for diagnosis.
-        if (left < 0f || left > 1f || top < 0f || top > 1f ||
-            right < 0f || right > 1f || bottom < 0f || bottom > 1f
-        ) {
-            return null
-        }
-        return BoundingBox(left, top, right, bottom)
+    /**
+     * Pixels in, fractions out. The domain model stays normalised so `cropRect`,
+     * `BubbleCrop` and the reader are untouched by this change.
+     *
+     * Still reject rather than clamp: a box outside the image means the model did
+     * not locate the bubble, and clamping collapses it into something that looks
+     * plausible. The reader's text fallback is the honest outcome.
+     */
+    private fun BoundsDto.toDomain(width: Int, height: Int): BoundingBox? {
+        // Defence in depth, not the active guard: kotlinx refuses to deserialize a
+        // non-finite value unless allowSpecialFloatingPointValues is set, which it
+        // is not, so such a payload fails the read before reaching here. Kept
+        // because NaN is false against every comparison below, so if that flag were
+        // ever turned on a NaN box would pass all of them intact.
+        if (!x1.isFinite() || !y1.isFinite() || !x2.isFinite() || !y2.isFinite()) return null
+        if (x1 < 0f || y1 < 0f || x2 > width.toFloat() || y2 > height.toFloat()) return null
+        if (x2 <= x1 || y2 <= y1) return null
+        return BoundingBox(x1 / width, y1 / height, x2 / width, y2 / height)
     }
 
-    private fun PageDto.toDomain(): ParsedPage = ParsedPage(
+    private fun PageDto.toDomain(width: Int, height: Int): ParsedPage = ParsedPage(
         units = units.map { u ->
-            ParsedUnit(speaker = u.speaker, text = u.text, bounds = u.bounds?.toDomain())
+            ParsedUnit(speaker = u.speaker, text = u.text, bounds = u.bounds?.toDomain(width, height))
         }.toSpeechUnits(),
     )
 }
