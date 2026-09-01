@@ -535,3 +535,91 @@ and tripled resolution the conclusion is that this model does not localise small
 stylised balloons, and §11's OCR split is the only remaining direction — with
 §13.4's warning attached, which §14.1 has now made concrete: OCR read only about
 half the words on this page and none at all of three balloons.
+
+
+---
+
+## 15. Stage B measured, and the cost taken back out again
+
+### 15.1 Stage B on device
+
+Bundle `page-1788284934899`, 2026-09-01. Same page, app data cleared, upload
+1583x2324 — exactly `modelVisibleSize` for the high-resolution tier — with
+`modelId: claude-sonnet-5`, `resolutionTier: HIGH_RESOLUTION`, parse v6 recorded in
+`meta.json`.
+
+| | CameraX v4 | scanner v4 | Stage A v5 | **Stage B** |
+|---|---|---|---|---|
+| **containment** | 0.035 | 0.504 | 0.101 | **0.846** |
+| mean IoU (text) | 0.005 | 0.070 | 0.058 | **0.302** |
+| mean IoU (text +60%) | 0.021 | 0.151 | 0.109 | **0.471** |
+| centre error dx | +0.114 | +0.161 | +0.106 | **+0.017** |
+| centre error dy | +0.141 | +0.079 | -0.012 | **-0.005** |
+| box width / text width | 3.98x | 2.84x | 1.74x | 1.85x (sd 0.16) |
+| centres fit x | 0.625 | 0.951 | — | **0.871, R2 0.998** |
+| centres fit y | 0.803 | 0.978 | — | **1.065, R2 0.976** |
+
+The largest single step in this investigation. Containment goes from a tenth to
+five sixths: most of the located text is now inside the box drawn for it. The
+centre error is gone on both axes. Speaker attribution improved alongside it —
+named characters where Stage A returned "Unknown Character" for six of eight units.
+
+Both ground-truth methods agree on this bundle (transcript 0.302-0.471, the
+superseded clustered method 0.366-0.434), which they did not on earlier ones.
+
+**It still does not clear the stop condition.** Best mean IoU 0.471 against 0.5.
+By the letter this is the middle outcome: materially up, below the bar. The
+measured IoU is biased low — OCR reads only about 60% of the words on this
+lettering, so the text extent it compares against is a lower bound — but that is
+an inference from containment, not a measurement, and it does not turn 0.471 into
+a pass.
+
+### 15.2 Stage B changed two things at once
+
+Model *and* resolution. Which one bought the improvement was never established, so
+it was tested: the same captured page, re-sent at a range of upload sizes and
+models, each result scored by the committed `measure_boxes.py`.
+
+| model @ upload | visual tokens | containment | IoU +60% |
+|---|---|---|---|
+| **Haiku 4.5** @ 902x1316 | 1551 | **0.000** | 0.001 |
+| **Sonnet 5** @ 902x1316 | **1551** | **0.932** | 0.467 (3 of 6 units clear 0.5) |
+| Sonnet 5 @ 1148x1687 | 2501 | 0.905 | 0.457 |
+| Sonnet 5 @ 1372x2016 | 3528 | 0.840 | 0.482 |
+| Sonnet 5 @ 1583x2324 | 4731 | 0.857 | 0.465 |
+
+**It was the model, not the pixels.** At an identical 1551 visual tokens, Haiku 4.5
+scores 0.000 containment and Sonnet 5 scores 0.932. Above that budget more
+resolution buys nothing measurable, and containment drifts slightly *down* as it
+rises. The cheapest row is the best row.
+
+Resolution was a reasonable hypothesis — §13.5 argued for it because the residual
+was scatter and scatter is what more pixels should reduce. It was wrong, and it
+was wrong in a way that only a controlled sweep could show, because Stage B moved
+both variables together and the result would otherwise have been credited to the
+expensive one.
+
+### 15.3 What ships
+
+Sonnet 5, uploaded at **1568 visual tokens** rather than the tier's 4784 —
+897x1316 on this capture, the same token count the app spent on Haiku 4.5.
+
+`VisionModel` now carries an upload budget separate from the tier ceiling. The
+ceiling is a fact about the model and is what keeps the upload safe from
+server-side resizing, so `oversized_image: "error"` still guarantees the returned
+pixels are pixels of the array we hold. The budget is our choice within it.
+
+Net cost against the original Haiku 4.5 app: **no token increase at all.** The only
+difference is Sonnet 5's price per token. Against Stage B as first implemented,
+this is a **3.05x token reduction**.
+
+### 15.4 Still open
+
+- **n=1.** One page, and the model segmented it into a different number of units on
+  each call (7 to 10), so the gaps between the resolution rows are within noise.
+  What is not within noise is 0.000 against 0.932 at the same size.
+- **The stop condition is unmet**, at 0.471 against 0.5, and no amount of
+  re-reading the same page will settle whether that matters. The honest test is
+  whether a child gets a usable crop, on several pages.
+- **Sonnet 5's price per token** still has to be read from the pricing page before
+  this is defensible as a permanent default.

@@ -35,7 +35,7 @@ class DownscaleTest {
     // derived from PAGE_VISION_MODEL rather than written as a literal.
 
     private fun tierSize(w: Int, h: Int) = modelVisibleSize(
-        w, h, PAGE_VISION_MODEL.tier.maxEdge, PAGE_VISION_MODEL.tier.maxTokens,
+        w, h, PAGE_VISION_MODEL.tier.maxEdge, PAGE_VISION_MODEL.uploadTokens,
     ).let { it.width to it.height }
 
     @Test fun `sizes the upload to what the model sees and preserves aspect ratio`() {
@@ -147,6 +147,8 @@ class DownscaleTest {
     }
 
     @Test fun `the upload copy never needs a server-side resize`() {
+        // Against the model's CEILING, which is what the server would enforce --
+        // not against our own budget, which is stricter and is checked separately.
         val tier = PAGE_VISION_MODEL.tier
         for (source in listOf(jpeg(3000, 4000), jpeg(4000, 3000), jpeg(2532, 3695))) {
             val image = downscaleToPageImage(source, rotationDegrees = 0)
@@ -156,6 +158,22 @@ class DownscaleTest {
             )
             assertTrue(maxOf(image.width, image.height) <= tier.maxEdge)
         }
+    }
+
+    /**
+     * The saving this budget exists for. Measurement found the model, not the
+     * resolution, is what localises a balloon: Sonnet 5 scored containment 0.932 at
+     * this budget against 0.857 at the tier's full 4731 tokens, while Haiku 4.5 at
+     * the same budget scored 0.000. Sending the bigger image would triple the bill
+     * to buy nothing, so this pins that we do not.
+     */
+    @Test fun `the upload spends only the chosen budget, not the tier's ceiling`() {
+        val image = downscaleToPageImage(jpeg(2587, 3797), rotationDegrees = 0)
+        val spent = visualTokens(image.width, image.height)
+        assertTrue("spent $spent, budget ${PAGE_VISION_MODEL.uploadTokens}",
+            spent <= PAGE_VISION_MODEL.uploadTokens)
+        assertTrue("budget should sit well below the tier ceiling",
+            PAGE_VISION_MODEL.uploadTokens < PAGE_VISION_MODEL.tier.maxTokens)
     }
 
     @Test fun `the display copy keeps its full resolution when upright`() {

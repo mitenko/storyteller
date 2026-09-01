@@ -27,15 +27,16 @@ private const val TAG = "Downscale"
  * would have fitted, rather than quietly returning coordinates in a different
  * space.
  *
- * The limits default to the tier of the model the page is actually read with, so
- * changing that model changes this with it. They stay parameters only so a test
- * can pin a tier explicitly.
+ * The edge limit is the model's tier ceiling; the token limit is the budget we
+ * choose to spend within it, which measurement puts well below that ceiling. Both
+ * follow PAGE_VISION_MODEL, so changing the model changes them with it, and they
+ * stay parameters only so a test can pin a size explicitly.
  */
 fun downscaleToPageImage(
     jpeg: ByteArray,
     rotationDegrees: Int = 0,
     maxEdge: Int = PAGE_VISION_MODEL.tier.maxEdge,
-    maxTokens: Int = PAGE_VISION_MODEL.tier.maxTokens,
+    maxTokens: Int = PAGE_VISION_MODEL.uploadTokens,
     quality: Int = JPEG_QUALITY,
 ): PageImage {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }

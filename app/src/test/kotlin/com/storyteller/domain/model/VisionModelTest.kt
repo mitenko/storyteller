@@ -26,6 +26,34 @@ class VisionModelTest {
         assertEquals(ResolutionTier.HIGH_RESOLUTION, PAGE_VISION_MODEL.tier)
     }
 
+    @Test fun `the upload budget sits below the tier ceiling and is honoured`() {
+        assertEquals(PAGE_UPLOAD_VISUAL_TOKENS, PAGE_VISION_MODEL.uploadTokens)
+        assertTrue(PAGE_VISION_MODEL.uploadTokens < PAGE_VISION_MODEL.tier.maxTokens)
+    }
+
+    @Test fun `a budget above the tier ceiling is refused`() {
+        try {
+            VisionModel("x", ResolutionTier.STANDARD, uploadTokens = 4784)
+            throw AssertionError("expected an over-ceiling budget to be rejected")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message!!.contains("ceiling"))
+        }
+    }
+
+    @Test fun `the page uploads at the budget, not at the tier's maximum`() {
+        val page = ImageSize(2587, 3797)
+        val atBudget = modelVisibleSize(
+            page.width, page.height,
+            PAGE_VISION_MODEL.tier.maxEdge, PAGE_VISION_MODEL.uploadTokens,
+        )
+        val atCeiling = modelVisibleSize(
+            page.width, page.height,
+            PAGE_VISION_MODEL.tier.maxEdge, PAGE_VISION_MODEL.tier.maxTokens,
+        )
+        assertEquals(ImageSize(897, 1316), atBudget)
+        assertEquals(ImageSize(1583, 2324), atCeiling)
+    }
+
     @Test fun `the scanner page reaches a high resolution model far larger`() {
         val page = ImageSize(2532, 3695)
         val standard = modelVisibleSize(
