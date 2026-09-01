@@ -623,3 +623,51 @@ this is a **3.05x token reduction**.
   whether a child gets a usable crop, on several pages.
 - **Sonnet 5's price per token** still has to be read from the pricing page before
   this is defensible as a permanent default.
+
+
+---
+
+## 16. The cheap configuration measured on device, and it passes
+
+Bundle `page-1788289251857`, 2026-09-01. Same page, app data cleared. Upload
+**870x1372 = 1568 visual tokens** exactly the budget, with `claude-sonnet-5`,
+`HIGH_RESOLUTION` and parse v6 in `meta.json`.
+
+| | scanner v4 | Stage A | Stage B @4731 tok | **Stage B @1568 tok** |
+|---|---|---|---|---|
+| **containment** | 0.504 | 0.101 | 0.846 | **0.929** |
+| mean IoU (text) | 0.070 | 0.058 | 0.302 | **0.325** |
+| mean IoU (+60%) | 0.151 | 0.109 | 0.471 | **0.559** |
+| centre error dx | +0.161 | +0.106 | +0.017 | **+0.014** (sd 0.028) |
+| centre error dy | +0.079 | -0.012 | -0.005 | **-0.008** (sd 0.015) |
+| centres fit x | 0.951 | — | 0.871 | **0.917, R2 0.993** |
+| centres fit y | 0.978 | — | 1.065 | **1.070, R2 0.998** |
+| visual tokens | 1551 | 1551 | 4731 | **1568** |
+
+**The stop condition is met: mean IoU 0.559 against 0.5.** The first configuration
+to clear it, and it is the cheapest one measured. Four of six scored units have
+containment of exactly 1.000 — the box wholly encloses its text.
+
+The offline sweep in section 15.2 transferred to the device path: the small upload
+beats the large one on every metric, at a third of the tokens.
+
+### 16.1 Two qualifications on that PASS
+
+**0.559 is the +60%-padding figure; against the bare text extent it is 0.325.** A
+drawn balloon legitimately encloses its text with a margin, so the padded figure is
+the fair comparison — but the stop condition was written without saying which, and
+reading it the favourable way is a choice worth declaring rather than burying.
+Containment 0.929 is the more trustworthy number and does not depend on that
+choice.
+
+**Still one page.** Every measurement in sections 13-16 is the same page. The model
+also segmented it differently on each call — 7 to 10 units — so unit-level figures
+carry real noise. Before this is a production default it needs a dense page, a
+sparse page and a multi-panel layout, per the plan's Task 4 Step 5.
+
+### 16.2 A bug fixed to get here
+
+`measure_boxes.py` failed the whole bundle when an OCR word contained a raw control
+character, which PowerShell emits unescaped and the JSON decoder rejects. Now
+parsed with `strict=False`: the word's text barely matters, its box is what is
+being measured, and failing an entire measurement over one stray byte was wrong.

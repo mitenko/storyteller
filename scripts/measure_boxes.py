@@ -153,7 +153,12 @@ def ocr(image_path):
         )
         if out.returncode != 0:
             raise RuntimeError("OCR failed: %s" % out.stderr.decode(errors="replace").strip())
-        payload = json.loads(out.stdout.decode("utf-8-sig", errors="replace"))
+        # strict=False: the OCR engine occasionally returns a word containing a
+        # raw control character, which PowerShell's ConvertTo-Json emits unescaped
+        # and the default decoder then rejects. The word's TEXT barely matters here
+        # -- its box is what is being measured -- so tolerating it is right, and
+        # failing the whole bundle over one stray byte was not.
+        payload = json.loads(out.stdout.decode("utf-8-sig", errors="replace"), strict=False)
     finally:
         os.unlink(ps1)
     words = payload.get("words") or []
