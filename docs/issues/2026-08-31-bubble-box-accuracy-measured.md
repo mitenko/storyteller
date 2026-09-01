@@ -291,3 +291,74 @@ Before committing to that split, one isolated experiment is worthwhile: request
 absolute pixel boxes in a fresh call and record the model-seen dimensions. If
 that result remains poor, stop prompt tuning and proceed with the OCR/localizer
 design.
+
+
+---
+
+## 12. The measurement is now a committed tool
+
+Every number in sections 1-9 came from a throwaway script in a temp directory.
+Those scripts no longer exist, so none of those numbers could be re-derived. The
+measurement now lives at `scripts/measure_boxes.py`, and its output on both
+existing bundles is committed at `scripts/fixtures/box-measurements.txt`.
+
+    python scripts/measure_boxes.py diagnostics-pulled/<bundle> [--out FILE]
+
+### 12.1 What reproduced, and what did not
+
+Run against the two bundles this document already discusses:
+
+| | published above | committed tool | |
+|---|---|---|---|
+| CameraX `page-1788205074358`, mean IoU | 0.007 | **0.009** | agrees |
+| CameraX, centre error dy | +0.121 | **+0.119** | agrees |
+| CameraX, affine slope both axes | ~0.70 | **0.625 (x), 0.803 (y)** | does NOT agree |
+| scanner `page-1788215961215`, mean IoU | not recorded | **0.078** | — |
+| scanner, centre slope | not recorded | **0.951 (x), 0.978 (y)** | — |
+
+The IoU and the centre error reproduce. **The affine slopes do not**, and the
+reason is visible in the tool's output: the original run paired one unit with a
+single-word OCR cluster (`"TO"`), which reported that balloon as 16x too wide
+and dragged the fit. The committed tool refuses a cluster with fewer than three
+letters, which removes that pairing. Its slopes are the trustworthy ones.
+
+This does not change any conclusion in this document. Both IoU figures are two
+orders of magnitude below the 0.5 stop condition, and the verdict in section 2
+stands exactly as written.
+
+### 12.2 The scanner measurement, recorded at last
+
+Section 9 discusses the ML Kit scanner bundle without ever stating its numbers;
+they were reported in conversation and never written down. They are:
+
+| | CameraX | ML Kit scanner |
+|---|---|---|
+| mean IoU (text extent) | 0.009 | **0.078** |
+| mean IoU (text +60%) | 0.031 | **0.138** |
+| centre error dx | +0.139 | +0.158 |
+| centre error dy | +0.119 | +0.086 |
+| box width / text width | 3.90x | **3.15x** |
+| centre-fit slope x | 0.625 | **0.951** |
+| centre-fit slope y | 0.803 | **0.978** |
+
+The scanner change made the boxes roughly eight times better by IoU and, more
+informatively, removed the scale distortion: the centre-fit slopes moved from
+0.63/0.80 to 0.95/0.98. What remains is close to a pure translation, about +0.16
+right and +0.09 down.
+
+That matters for section 9's claim that "the error pattern is not a constant
+affine transform". On the scanner bundle it very nearly is one. The distinction
+is worth keeping straight because it separates "the model is guessing" from
+"there is a systematic bias", and only the second is worth correcting for.
+
+One measurement is n=1. Do not hardcode a correction for that offset.
+
+### 12.3 Two fits, not one
+
+The tool reports the affine fit twice, over box edges and over box centres,
+because they answer different questions and this document has conflated them.
+A slope over **edges** below 1 means the boxes are larger than the text they
+enclose. A slope over **centres** of 1 with a non-zero intercept means a pure
+positional offset, whatever the size error. Section 3's reading of "slope 0.70
+means 1.43x too large" is an edges interpretation; the R2 of 0.984 quoted beside
+it is a centres figure. They cannot both come from the same fit.

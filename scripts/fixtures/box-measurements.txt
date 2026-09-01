@@ -1,0 +1,76 @@
+
+==============================================================================
+page-1788205074358
+==============================================================================
+upload 1176x1568  (decoded 1176x1568)
+device Google Pixel 9a, sdk 37
+coordinates fractions (parse v1-4)
+8 units (8 with a box), 38 OCR words in 5 clusters, 5 matched
+coverage 62% of boxed units matched to OCR text
+
+per unit (all figures normalised to the image, 0..1):
+  #   speaker      model box                   OCR text extent                  dx      dy    w/w    IoU
+  1   Character    0.750 0.220 0.950 0.300     0.584 0.170 0.634 0.183      +0.241  +0.084   3.99  0.000
+  3   Duncan       0.420 0.350 0.750 0.550     0.278 0.357 0.389 0.445      +0.251  +0.049   2.96  0.000
+  4   Aly          0.080 0.620 0.500 0.820     0.241 0.534 0.379 0.650      -0.020  +0.128   3.05  0.043
+  5   Character    0.500 0.620 0.920 0.750     0.548 0.508 0.630 0.605      +0.121  +0.129   5.09  0.000
+  7   Character    0.500 0.880 0.920 1.000     0.561 0.686 0.656 0.782      +0.101  +0.206   4.41  0.000
+
+centre error   dx mean +0.139 (sd 0.112)   dy mean +0.119 (sd 0.059)
+size ratio     model width / text width: mean 3.90 (sd 0.91), range 2.96-5.09
+
+IoU against the OCR text extent, at three padding assumptions:
+  text  +0%   mean IoU 0.009   (0 of 5 units above 0.5)
+  text +30%   mean IoU 0.017   (0 of 5 units above 0.5)
+  text +60%   mean IoU 0.031   (0 of 5 units above 0.5)
+
+affine fit, true = a*model + b.  Both are reported because they answer
+different questions and the distinction has been conflated before:
+  over EDGES   - captures position AND size. a below 1 means the boxes are
+                 larger than the text they enclose.
+  over CENTRES - captures position only. a of 1 with b nonzero is a pure
+                 offset, whatever the boxes' size error.
+  edges    x  a 0.450  b +0.207  R2 0.656  (n=10)
+  edges    y  a 0.780  b +0.015  R2 0.971  (n=10)
+  centres  x  a 0.625  b +0.097  R2 0.737  (n=5)
+  centres  y  a 0.803  b +0.001  R2 0.982  (n=5)
+
+VERDICT: best mean IoU 0.031 against the 0.5 stop condition -- FAIL
+
+==============================================================================
+page-1788215961215
+==============================================================================
+upload 1021x1568  (decoded 1021x1568)
+device Google Pixel 9a, sdk 37
+coordinates fractions (parse v1-4)
+8 units (8 with a box), 49 OCR words in 6 clusters, 5 matched
+coverage 62% of boxed units matched to OCR text
+
+per unit (all figures normalised to the image, 0..1):
+  #   speaker      model box                   OCR text extent                  dx      dy    w/w    IoU
+  2   Character    0.050 0.380 0.350 0.480     0.045 0.270 0.098 0.325      +0.129  +0.132   5.67  0.000
+  3   Duncan       0.350 0.420 0.700 0.620     0.119 0.318 0.294 0.445      +0.319  +0.139   2.00  0.000
+  4   Aly          0.050 0.650 0.500 0.850     0.092 0.598 0.274 0.710      +0.092  +0.096   2.47  0.111
+  5   Character    0.520 0.480 0.950 0.620     0.529 0.532 0.712 0.659      +0.115  -0.045   2.35  0.240
+  7   Character    0.520 0.850 0.950 1.000     0.533 0.759 0.665 0.872      +0.136  +0.109   3.25  0.039
+
+centre error   dx mean +0.158 (sd 0.091)   dy mean +0.086 (sd 0.076)
+size ratio     model width / text width: mean 3.15 (sd 1.48), range 2.00-5.67
+
+IoU against the OCR text extent, at three padding assumptions:
+  text  +0%   mean IoU 0.078   (0 of 5 units above 0.5)
+  text +30%   mean IoU 0.112   (0 of 5 units above 0.5)
+  text +60%   mean IoU 0.138   (0 of 5 units above 0.5)
+
+affine fit, true = a*model + b.  Both are reported because they answer
+different questions and the distinction has been conflated before:
+  over EDGES   - captures position AND size. a below 1 means the boxes are
+                 larger than the text they enclose.
+  over CENTRES - captures position only. a of 1 with b nonzero is a pure
+                 offset, whatever the boxes' size error.
+  edges    x  a 0.699  b -0.009  R2 0.755  (n=10)
+  edges    y  a 0.925  b -0.038  R2 0.864  (n=10)
+  centres  x  a 0.951  b -0.134  R2 0.874  (n=5)
+  centres  y  a 0.978  b -0.072  R2 0.871  (n=5)
+
+VERDICT: best mean IoU 0.138 against the 0.5 stop condition -- FAIL

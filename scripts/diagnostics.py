@@ -26,6 +26,7 @@ import json
 import os
 import subprocess
 import sys
+import traceback
 
 PACKAGE = "com.storyteller"
 REMOTE_DIR = "files/diagnostics"
@@ -73,6 +74,29 @@ def pull(serial, out_dir):
     return pulled
 
 
+def box_in_pixels(bounds, width, height):
+    """A response box in image pixels, whichever coordinate convention it uses.
+
+    Parse versions 1-4 returned fractions of the image under left/top/right/
+    bottom; version 5 returns absolute pixels under x1/y1/x2/y2. Both shapes are
+    handled so that bundles pulled before and after the protocol change can be
+    overlaid and compared with the same command.
+
+    Returns (box, outside), where `outside` marks a box the model placed beyond
+    the image -- the app rejects those rather than cropping to them.
+    """
+    if "x1" in bounds:
+        box = (float(bounds["x1"]), float(bounds["y1"]),
+               float(bounds["x2"]), float(bounds["y2"]))
+        outside = box[0] < 0 or box[1] < 0 or box[2] > width or box[3] > height
+    else:
+        f = (float(bounds["left"]), float(bounds["top"]),
+             float(bounds["right"]), float(bounds["bottom"]))
+        outside = any(v < 0.0 or v > 1.0 for v in f)
+        box = (f[0] * width, f[1] * height, f[2] * width, f[3] * height)
+    return box, outside
+
+
 def overlay(bundle):
     from PIL import Image, ImageDraw
 
@@ -84,8 +108,17 @@ def overlay(bundle):
         print("\n%s  has a non-JSON response; see response.json and error.txt" %
               os.path.basename(bundle))
         return None
+    # Drawn on page-display, but v5 boxes are pixels of page-UPLOAD, so they are
+    # rescaled through the upload's dimensions rather than used directly.
     img = Image.open(os.path.join(bundle, "page-display.jpg")).convert("RGB")
     w, h = img.size
+    upload_w, upload_h = w, h
+    meta_path = os.path.join(bundle, "meta.json")
+    if os.path.exists(meta_path):
+        with open(meta_path, encoding="utf-8") as fh:
+            meta = json.load(fh)
+        upload_w = meta.get("uploadWidth") or w
+        upload_h = meta.get("uploadHeight") or h
     draw = ImageDraw.Draw(img)
 
     print("\n%s  (display %dx%d)" % (os.path.basename(bundle), w, h))
@@ -97,10 +130,12 @@ def overlay(bundle):
         if not b:
             print("  [%2d] %-14s no box                          %r" % (i, speaker[:14], text))
             continue
-        off = [v for v in (b["left"], b["top"], b["right"], b["bottom"]) if v < 0.0 or v > 1.0]
+        box, off = box_in_pixels(b, upload_w, upload_h)
         if off:
             outside += 1
-        box = (b["left"] * w, b["top"] * h, b["right"] * w, b["bottom"] * h)
+        # Into display space, so the drawing lands on the page the reader sees.
+        sx, sy = w / float(upload_w), h / float(upload_h)
+        box = (box[0] * sx, box[1] * sy, box[2] * sx, box[3] * sy)
         # Clamp only for DRAWING, so an off-page box is still visible as the
         # edge it ran past rather than silently vanishing.
         drawn = (max(0, min(w - 1, box[0])), max(0, min(h - 1, box[1])),
@@ -111,19 +146,19 @@ def overlay(bundle):
         colour = (255, 64, 64) if off else (64, 220, 64)
         draw.rectangle(drawn, outline=colour, width=max(2, w // 300))
         draw.text((drawn[0] + 4, drawn[1] + 4), "%d %s" % (i, speaker[:12]), fill=colour)
-        print("  [%2d] %-14s L%.3f T%.3f R%.3f B%.3f%s  %r"
-              % (i, speaker[:14], b["left"], b["top"], b["right"], b["bottom"],
-                 "  <-- OUTSIDE 0..1" if off else "", text))
+        print("  [%2d] %-14s L%.0f T%.0f R%.0f B%.0f px%s  %r"
+              % (i, speaker[:14], box[0], box[1], box[2], box[3],
+                 "  <-- OUTSIDE THE IMAGE" if off else "", text))
 
     out = os.path.join(bundle, "overlay.png")
     img.save(out)
     print("  -> %s" % out)
     if outside:
-        print("  !! %d box(es) fall outside 0..1; the app rejects those for cropping" % outside)
+        print("  !! %d box(es) fall outside the image; the app rejects those for cropping" % outside)
     return out
 
 
-def main():
+def run():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
@@ -142,6 +177,17 @@ def main():
         for b in args.bundles:
             overlay(b)
     return 0
+
+
+def main():
+    try:
+        return run()
+    except Exception:
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, "error.txt"), "w", encoding="utf-8") as fh:
+            fh.write(traceback.format_exc())
+        traceback.print_exc()
+        return 1
 
 
 if __name__ == "__main__":
