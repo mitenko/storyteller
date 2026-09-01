@@ -362,3 +362,89 @@ enclose. A slope over **centres** of 1 with a non-zero intercept means a pure
 positional offset, whatever the size error. Section 3's reading of "slope 0.70
 means 1.43x too large" is an edges interpretation; the R2 of 0.984 quoted beside
 it is a centres figure. They cannot both come from the same fit.
+
+
+---
+
+## 13. Stage A measured: absolute pixel coordinates
+
+Bundle `page-1788278845946`, 2026-09-01. Same page, same scanner, app data cleared
+before the scan so no cached parse could be served.
+
+### 13.1 The protocol worked exactly as designed
+
+| check | result |
+|---|---|
+| upload dimensions | **902x1316** |
+| `modelVisibleSize(2532x3695)` | **902x1316** — identical |
+| visual tokens | 1551 of 1568 |
+| server-side resize | none; the `oversized_image: "error"` guard did not fire |
+| coordinates returned | pixels, `x1/y1/x2/y2` (parse v5 live) |
+
+The arithmetic and the server agree. Every mechanical precondition this iteration
+set out to establish is established.
+
+### 13.2 The localisation still fails
+
+**Mean IoU 0.013 to 0.118 against a stop condition of 0.5.** Stage A is not a pass.
+
+What improved, and these hold regardless of the measurement parameter discussed
+in 13.3:
+
+| | CameraX v4 | scanner v4 | **scanner v5 (Stage A)** |
+|---|---|---|---|
+| box width / text width | 3.90x | 3.15x | **1.88x** |
+| centre error dx | +0.139 | +0.158 | **+0.095** |
+| centre error dy | +0.119 | +0.086 | **+0.005** |
+
+Box *size* is now close to correct: 1.88x the bare text extent, where a drawn
+balloon legitimately encloses its text at roughly 1.3-1.5x. The vertical offset
+has collapsed to zero. A rightward bias of about +0.10 remains.
+
+So asking in the documented format did change the model's behaviour, in the
+direction the vendor guidance predicts. It did not change it enough. The residual
+is per-balloon scatter, not a single transform that could be corrected for.
+
+### 13.3 The measurement is less trustworthy than sections 2 and 12 implied
+
+While checking whether the IoU drop against the scanner v4 bundle was real, the
+ground truth turned out to be parameter-dependent on this page:
+
+| clustering gap | mean IoU (Stage A bundle) | what the OCR does |
+|---|---|---|
+| 0.035 | 0.013 | splits Duncan's balloon across two clusters |
+| 0.050 | 0.118 | merges units 5 and 6, which are different balloons |
+| 0.070 | 0.118 | same over-merge |
+
+A **9x spread** on one bundle from one parameter. No single gap is correct for
+this page: small enough to keep two adjacent balloons apart is also small enough
+to split the lines of a third.
+
+`measure_boxes.py` now reports this spread on every run rather than quoting one
+number from it. Treat IoU in this document as an order of magnitude. The size
+ratio and centre error are stable across gaps and are the comparisons to trust.
+
+### 13.4 This is a problem for the recommendation in section 11
+
+Section 11 proposes handing localisation to local OCR. **The wall hit above is
+that wall.** OCR could not reliably separate this page's balloons well enough to
+*measure* against, and a localiser built on it would inherit exactly that
+failure, not solve it.
+
+That does not kill the idea, but it means section 11's recommendation is
+unproven, and any Stage C must first demonstrate that OCR can segment a comic
+page into balloons — not merely find words. Word boxes it produces well; balloon
+grouping it does not.
+
+### 13.5 Verdict
+
+Against the three outcomes set out in the Stage A plan, this is the middle one:
+**materially changed but far below the bar.** Stage B (a high-resolution-tier
+model) is the indicated next step, because the residual is scatter and scatter is
+what more input resolution plausibly reduces: on this capture the page reaches
+the model at 902x1316 today and would reach it at 1593x2324 on the high-resolution
+tier, 3.1x the pixel area.
+
+Before Stage B is measurable, the ground-truth problem in 13.3 has to be fixed.
+A 9x measurement spread cannot resolve the size of improvement Stage B would
+produce.

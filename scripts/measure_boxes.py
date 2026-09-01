@@ -54,6 +54,14 @@ MIN_CLUSTER_ALPHA = 3
 # text with a margin, so 0% is a lower bound that no correct box could reach.
 PADDINGS = (0.0, 0.30, 0.60)
 
+# IoU is re-reported at each of these gaps, because no single value is right for
+# a whole page. On the pages measured so far, a gap small enough to keep two
+# adjacent balloons apart also splits the lines of a third, and a gap large
+# enough to hold one balloon together merges its neighbour. The resulting spread
+# in IoU is roughly a factor of ten, which is far too large to quote one number
+# from -- so the spread is reported instead of being hidden behind a default.
+SENSITIVITY_GAPS = (0.035, 0.050, 0.070)
+
 OCR_PS1 = r'''
 param([Parameter(Mandatory=$true)][string]$Path)
 $ErrorActionPreference = 'Stop'
@@ -385,6 +393,28 @@ def measure(bundle, emit):
         ay, by, r2y, ny = fit(dy_pairs)
         emit("  %-8s x  a %.3f  b %+.3f  R2 %.3f  (n=%d)" % (label, ax, bx, r2x, nx))
         emit("  %-8s y  a %.3f  b %+.3f  R2 %.3f  (n=%d)" % (label, ay, by, r2y, ny))
+
+    emit("")
+    emit("sensitivity to the clustering gap (mean IoU against the text extent):")
+    spread = []
+    saved = globals()["CLUSTER_GAP"]
+    for g in SENSITIVITY_GAPS:
+        globals()["CLUSTER_GAP"] = g
+        alt_pairs = match(cluster_words(words, ocr_w, ocr_h), units)
+        if not alt_pairs:
+            emit("  gap %.3f   no matches" % g)
+            continue
+        vals = [iou(u["box"], (c["x1"], c["y1"], c["x2"], c["y2"])) for u, c, _ in alt_pairs]
+        m, _ = mean_sd(vals)
+        spread.append(m)
+        emit("  gap %.3f   mean IoU %.3f   over %d matched units" % (g, m, len(alt_pairs)))
+    globals()["CLUSTER_GAP"] = saved
+    if spread and min(spread) > 0 and max(spread) / min(spread) >= 3:
+        emit("  !! a %.0fx spread. The OCR ground truth cannot separate this page's"
+             % (max(spread) / min(spread)))
+        emit("     balloons cleanly at any one gap, so treat IoU here as an order of")
+        emit("     magnitude, not a figure. The size ratio and centre error above are")
+        emit("     stable across gaps and are the trustworthy comparisons.")
 
     emit("")
     best = max(
