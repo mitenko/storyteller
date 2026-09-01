@@ -48,3 +48,6 @@ diagnostics-pulled/
 
 # Runtime traceback dropped beside a failing script by the repo Python convention.
 scripts/error.txt
+
+# Python bytecode from running the scripts in scripts/.
+__pycache__/
