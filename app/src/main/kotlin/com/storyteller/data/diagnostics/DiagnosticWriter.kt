@@ -3,6 +3,8 @@ package com.storyteller.data.diagnostics
 import android.graphics.BitmapFactory
 import android.os.Build
 import android.util.Log
+import com.storyteller.data.local.PARSE_VERSION
+import com.storyteller.domain.model.PAGE_VISION_MODEL
 import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.ParsedPage
 import java.io.File
@@ -52,7 +54,10 @@ interface DiagnosticWriter {
  *    when the bundle was captured from a failed read.
  *  - `meta.json` — both images' real pixel dimensions and the build that
  *    produced them, since normalized bounds mean nothing without the dimensions
- *    they were normalized against.
+ *    they were normalized against, plus the model, resolution tier and parse
+ *    version responsible. Without those three a bundle can only be attributed to
+ *    a protocol by inferring from its upload size, and this issue has already
+ *    been misled once by that kind of inference.
  *
  * The bundle deliberately holds no derived crops. Deriving them on a machine
  * with the page and the boxes in hand is both cheaper and more flexible than
@@ -132,6 +137,9 @@ class DiagnosticWriterImpl(private val root: File) : DiagnosticWriter {
               "displayWidth": ${display.first},
               "displayHeight": ${display.second},
               "mimeType": "${image.mimeType}",
+              "modelId": "${PAGE_VISION_MODEL.id}",
+              "resolutionTier": "${PAGE_VISION_MODEL.tier.name}",
+              "parseVersion": $PARSE_VERSION,
               "device": "${Build.MANUFACTURER} ${Build.MODEL}",
               "androidSdk": ${Build.VERSION.SDK_INT}
             }

@@ -3,10 +3,12 @@ package com.storyteller.data.page
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import com.storyteller.data.local.PARSE_VERSION
 import com.storyteller.data.local.ParsedPageEntity
 import com.storyteller.data.local.StorytellerDatabase
 import com.storyteller.data.diagnostics.DiagnosticWriter
 import com.storyteller.data.sha256
+import com.storyteller.domain.model.PAGE_VISION_MODEL
 import com.storyteller.domain.model.ParsedPage
 import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.pageImage
@@ -146,7 +148,7 @@ class PageReaderImplTest {
         assertNull(units[0].bounds)
     }
 
-    @Test fun `request obeys the Haiku constraints`() = runTest {
+    @Test fun `request obeys the vision-call constraints`() = runTest {
         server.enqueue(okResponse("""[{"speaker":"Wolf","text":"Hi","bounds":null}]"""))
         reader().read(image(1, 2, 3)).getOrThrow()
 
@@ -154,11 +156,14 @@ class PageReaderImplTest {
         assertEquals("2023-06-01", recorded.headers["anthropic-version"])
         val body = json.parseToJsonElement(recorded.body!!.utf8()).jsonObject
 
-        assertEquals("claude-haiku-4-5", body["model"]!!.jsonPrimitive.content)
+        assertEquals(PAGE_VISION_MODEL.id, body["model"]!!.jsonPrimitive.content)
         assertTrue("must use structured outputs", body.containsKey("output_config"))
         assertTrue(body["output_config"]!!.jsonObject.containsKey("format"))
-        // Constraints from the spec: these three must never be sent to Haiku 4.5.
-        assertFalse("effort errors on Haiku 4.5", body["output_config"]!!.jsonObject.containsKey("effort"))
+        // Constraints from the spec. Written for Haiku 4.5, where `effort` errors
+        // outright; kept for any model because none of the three has been validated
+        // for this call, and an unvalidated tuning knob on a child's reading path is
+        // a defect rather than an experiment.
+        assertFalse("effort is not validated for this call", body["output_config"]!!.jsonObject.containsKey("effort"))
         assertFalse("thinking must not be sent", body.containsKey("thinking"))
         assertFalse("cache_control cannot hit at this prefix size", body.containsKey("cache_control"))
     }
@@ -433,11 +438,55 @@ class PageReaderImplTest {
      * A page cached under the old fraction protocol must not be served to the new
      * one: v4 rows hold numbers in a different unit entirely.
      */
-    @Test fun `a v4 cached parse is not reused under v5`() = runTest {
+    @Test fun `the request names the page vision model`() = runTest {
+        enqueueTextBlock("""{"units":[],"characters":[]}""")
+        reader().read(pageImage())
+        val body = server.takeRequest()!!.body!!.utf8()
+        assertTrue("request should name ${PAGE_VISION_MODEL.id}", body.contains(PAGE_VISION_MODEL.id))
+    }
+
+    /**
+     * Normalisation divides by the dimensions of the image we encoded -- never by
+     * Claude's padded dimensions, and never by a guess at what the server did.
+     * 893x1372 pads to 896x1372, so a full-width box normalises to exactly 1.0
+     * under the encoded width and 0.9967 under the padded one. That is the class
+     * of small silent error this whole line of work exists to remove, and it is
+     * true in the code today but was asserted nowhere.
+     */
+    @Test fun `bounds normalise by the encoded dimensions, not the padded ones`() = runTest {
+        enqueueTextBlock("""{"units":[
+            {"speaker":"Wolf","text":"HI","bounds":{"x1":0,"y1":0,"x2":893,"y2":1372}}
+        ],"characters":[]}""")
+        val b = reader().read(pageImage()).getOrThrow().units[0].bounds!!
+        assertEquals("must divide by 893, not the padded 896", 1f, b.right, 0.0001f)
+    }
+
+    /**
+     * A parse cache must never return one model's answer for another model's
+     * question. Today a tier change also changes the upload size and so the byte
+     * hash, which made this survivable -- but that is a coincidence of one change,
+     * not a property of the design.
+     */
+    @Test fun `a parse cached under one model is not served to another`() = runTest {
         val img = pageImage()
         db.parsedPageDao().upsert(
             ParsedPageEntity(
-                sha256(img.bytes),
+                sha256(img.bytes + "some-other-model".toByteArray()),
+                """{"units":[{"speaker":"Stale","text":"OLD","bounds":null}]}""",
+                System.currentTimeMillis(),
+                parseVersion = PARSE_VERSION,
+            ),
+        )
+        enqueueTextBlock("""{"units":[{"speaker":"Fresh","text":"NEW","bounds":null}],"characters":[]}""")
+
+        assertEquals("Fresh", reader().read(img).getOrThrow().units[0].speaker)
+    }
+
+    @Test fun `a v4 cached parse is not reused under the current version`() = runTest {
+        val img = pageImage()
+        db.parsedPageDao().upsert(
+            ParsedPageEntity(
+                sha256(img.bytes + PAGE_VISION_MODEL.id.toByteArray()),
                 """{"units":[{"speaker":"Stale","text":"OLD","bounds":null}]}""",
                 System.currentTimeMillis(),
                 parseVersion = 4,

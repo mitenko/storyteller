@@ -4,7 +4,7 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 
 /** Bumped whenever the cached parse payload's shape changes; older rows are misses. */
-const val PARSE_VERSION = 5
+const val PARSE_VERSION = 6
 
 @Entity(tableName = "character_voice")
 data class CharacterVoiceEntity(

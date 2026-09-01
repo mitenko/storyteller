@@ -4,9 +4,8 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.util.Log
-import com.storyteller.domain.geometry.STANDARD_MAX_EDGE
-import com.storyteller.domain.geometry.STANDARD_MAX_VISUAL_TOKENS
 import com.storyteller.domain.geometry.modelVisibleSize
+import com.storyteller.domain.model.PAGE_VISION_MODEL
 import com.storyteller.domain.model.PageImage
 import java.io.ByteArrayOutputStream
 
@@ -28,13 +27,15 @@ private const val TAG = "Downscale"
  * would have fitted, rather than quietly returning coordinates in a different
  * space.
  *
- * Pass the high-resolution tier's limits (2576 / 4784) for a model on that tier.
+ * The limits default to the tier of the model the page is actually read with, so
+ * changing that model changes this with it. They stay parameters only so a test
+ * can pin a tier explicitly.
  */
 fun downscaleToPageImage(
     jpeg: ByteArray,
     rotationDegrees: Int = 0,
-    maxEdge: Int = STANDARD_MAX_EDGE,
-    maxTokens: Int = STANDARD_MAX_VISUAL_TOKENS,
+    maxEdge: Int = PAGE_VISION_MODEL.tier.maxEdge,
+    maxTokens: Int = PAGE_VISION_MODEL.tier.maxTokens,
     quality: Int = JPEG_QUALITY,
 ): PageImage {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }

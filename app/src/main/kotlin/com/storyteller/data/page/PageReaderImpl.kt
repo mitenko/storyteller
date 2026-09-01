@@ -9,6 +9,7 @@ import com.storyteller.data.sha256
 import com.storyteller.domain.model.BoundingBox
 import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.ParsedPage
+import com.storyteller.domain.model.PAGE_VISION_MODEL
 import com.storyteller.domain.model.ParsedUnit
 import com.storyteller.domain.model.toSpeechUnits
 import com.storyteller.domain.repository.PageReader
@@ -24,7 +25,6 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
-private const val MODEL = "claude-haiku-4-5"
 private const val MAX_TOKENS = 2048
 
 @Serializable
@@ -68,7 +68,13 @@ class PageReaderImpl(
                 "returns cannot be normalised without them"
         }
 
-        val hash = sha256(image.bytes)
+        // The model belongs in the cache key, not just the bytes: two models given
+        // byte-identical uploads are two different answers to the same question.
+        // A tier change happens to alter the upload size and so the hash, which is
+        // why this was survivable -- but that is a coincidence of one change, and
+        // the next same-tier model switch would silently serve the previous
+        // model's boxes for a page it never saw.
+        val hash = sha256(image.bytes + PAGE_VISION_MODEL.id.toByteArray())
 
         parsedPageDao.findCurrent(hash, PARSE_VERSION)?.let { cached ->
             return json.decodeFromString<PageDto>(cached.unitsJson).toDomain(image.width, image.height)
@@ -114,7 +120,7 @@ class PageReaderImpl(
     }
 
     private fun requestBody(image: PageImage): JsonObject = buildJsonObject {
-        put("model", MODEL)
+        put("model", PAGE_VISION_MODEL.id)
         put("max_tokens", MAX_TOKENS)
         // No "thinking", no "cache_control", and no effort inside output_config:
         // see Global Constraints. Sending any of them is a defect, not a tuning knob.
