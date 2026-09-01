@@ -4,25 +4,40 @@ page-1788205074358
 ==============================================================================
 upload 1176x1568  (decoded 1176x1568)
 device Google Pixel 9a, sdk 37
+model (not recorded), tier (not recorded), parse v(not recorded)
 coordinates fractions (parse v1-4)
-8 units (8 with a box), 38 OCR words in 5 clusters, 5 matched
-coverage 62% of boxed units matched to OCR text
+
+GROUND TRUTH: OCR words aligned to the model's own transcript.
+  #   speaker      aligned  wanted   conf  used
+  0   Character          -       -      -  no  (OCR found none of its text)
+  1   Character          -       -      -  no  (OCR found none of its text)
+  2   Character          -       -      -  no  (OCR found none of its text)
+  3   Duncan             3       8   0.38  yes
+  4   Aly                7      11   0.64  yes
+  5   Character          4       6   0.67  yes
+  6   Character          1       5   0.20  NO  (below the confidence floor)
+  7   Character          4       9   0.44  yes
+  7 OCR words matched no unit; units never located: [0, 1, 2]
+  4 of 8 boxed units scored
 
 per unit (all figures normalised to the image, 0..1):
-  #   speaker      model box                   OCR text extent                  dx      dy    w/w    IoU
-  1   Character    0.750 0.220 0.950 0.300     0.584 0.170 0.634 0.183      +0.241  +0.084   3.99  0.000
-  3   Duncan       0.420 0.350 0.750 0.550     0.278 0.357 0.389 0.445      +0.251  +0.049   2.96  0.000
-  4   Aly          0.080 0.620 0.500 0.820     0.241 0.534 0.379 0.650      -0.020  +0.128   3.05  0.043
-  5   Character    0.500 0.620 0.920 0.750     0.548 0.508 0.630 0.605      +0.121  +0.129   5.09  0.000
-  7   Character    0.500 0.880 0.920 1.000     0.561 0.686 0.656 0.782      +0.101  +0.206   4.41  0.000
+  #   speaker      model box                   OCR text extent                  dx      dy    w/w    IoU   cont
+  3   Duncan       0.420 0.350 0.750 0.550     0.284 0.357 0.389 0.417      +0.248  +0.063   3.13  0.000  0.000
+  4   Aly          0.080 0.620 0.500 0.820     0.241 0.534 0.369 0.634      -0.015  +0.136   3.29  0.019  0.139
+  5   Character    0.500 0.620 0.920 0.750     0.548 0.508 0.630 0.563      +0.121  +0.149   5.09  0.000  0.000
+  7   Character    0.500 0.880 0.920 1.000     0.561 0.703 0.656 0.749      +0.101  +0.214   4.41  0.000  0.000
 
-centre error   dx mean +0.139 (sd 0.112)   dy mean +0.119 (sd 0.059)
-size ratio     model width / text width: mean 3.90 (sd 0.91), range 2.96-5.09
+centre error   dx mean +0.114 (sd 0.108)   dy mean +0.141 (sd 0.062)
+size ratio     model width / text width: mean 3.98 (sd 0.93), range 3.13-5.09
+containment    of the located text inside the model's box: mean 0.035 (sd 0.070)
+               Containment is robust to OCR reading only part of a balloon,
+               which IoU is not: a box can enclose everything found and still
+               score a low IoU purely because most of the text went unread.
 
 IoU against the OCR text extent, at three padding assumptions:
-  text  +0%   mean IoU 0.009   (0 of 5 units above 0.5)
-  text +30%   mean IoU 0.017   (0 of 5 units above 0.5)
-  text +60%   mean IoU 0.031   (0 of 5 units above 0.5)
+  text  +0%   mean IoU 0.005   (0 of 4 units above 0.5)
+  text +30%   mean IoU 0.012   (0 of 4 units above 0.5)
+  text +60%   mean IoU 0.021   (0 of 4 units above 0.5)
 
 affine fit, true = a*model + b.  Both are reported because they answer
 different questions and the distinction has been conflated before:
@@ -30,42 +45,61 @@ different questions and the distinction has been conflated before:
                  larger than the text they enclose.
   over CENTRES - captures position only. a of 1 with b nonzero is a pure
                  offset, whatever the boxes' size error.
-  edges    x  a 0.450  b +0.207  R2 0.656  (n=10)
-  edges    y  a 0.780  b +0.015  R2 0.971  (n=10)
-  centres  x  a 0.625  b +0.097  R2 0.737  (n=5)
-  centres  y  a 0.803  b +0.001  R2 0.982  (n=5)
+  edges    x  a 0.437  b +0.209  R2 0.596  (n=8)
+  edges    y  a 0.640  b +0.111  R2 0.962  (n=8)
+  centres  x  a 0.682  b +0.068  R2 0.704  (n=4)
+  centres  y  a 0.695  b +0.072  R2 0.995  (n=4)
 
-sensitivity to the clustering gap (mean IoU against the text extent):
+gap independence: transcript extents identical at gaps 0.035, 0.050, 0.070 -- YES
+
+secondary, the superseded clustered ground truth (kept so these bundles
+stay comparable with numbers already published):
   gap 0.035   mean IoU 0.009   over 5 matched units
   gap 0.050   mean IoU 0.009   over 5 matched units
   gap 0.070   mean IoU 0.009   over 5 matched units
 
-VERDICT: best mean IoU 0.031 against the 0.5 stop condition -- FAIL
+VERDICT: best mean IoU 0.021 against the 0.5 stop condition -- FAIL
 
 ==============================================================================
 page-1788215961215
 ==============================================================================
 upload 1021x1568  (decoded 1021x1568)
 device Google Pixel 9a, sdk 37
+model (not recorded), tier (not recorded), parse v(not recorded)
 coordinates fractions (parse v1-4)
-8 units (8 with a box), 49 OCR words in 6 clusters, 5 matched
-coverage 62% of boxed units matched to OCR text
+
+GROUND TRUTH: OCR words aligned to the model's own transcript.
+  #   speaker      aligned  wanted   conf  used
+  0   Character          -       -      -  no  (OCR found none of its text)
+  1   Character          -       -      -  no  (OCR found none of its text)
+  2   Character          1       3   0.33  NO  (below the confidence floor)
+  3   Duncan             5       8   0.62  yes
+  4   Aly                8      11   0.73  yes
+  5   Character          4       6   0.67  yes
+  6   Character          3       5   0.60  yes
+  7   Character          5       9   0.56  yes
+  9 OCR words matched no unit; units never located: [0, 1]
+  5 of 8 boxed units scored
 
 per unit (all figures normalised to the image, 0..1):
-  #   speaker      model box                   OCR text extent                  dx      dy    w/w    IoU
-  2   Character    0.050 0.380 0.350 0.480     0.045 0.270 0.098 0.325      +0.129  +0.132   5.67  0.000
-  3   Duncan       0.350 0.420 0.700 0.620     0.119 0.318 0.294 0.445      +0.319  +0.139   2.00  0.000
-  4   Aly          0.050 0.650 0.500 0.850     0.092 0.598 0.274 0.710      +0.092  +0.096   2.47  0.111
-  5   Character    0.520 0.480 0.950 0.620     0.529 0.532 0.712 0.659      +0.115  -0.045   2.35  0.240
-  7   Character    0.520 0.850 0.950 1.000     0.533 0.759 0.665 0.872      +0.136  +0.109   3.25  0.039
+  #   speaker      model box                   OCR text extent                  dx      dy    w/w    IoU   cont
+  3   Duncan       0.350 0.420 0.700 0.620     0.119 0.318 0.294 0.445      +0.319  +0.139   2.00  0.000  0.000
+  4   Aly          0.050 0.650 0.500 0.850     0.071 0.562 0.259 0.691      +0.110  +0.123   2.41  0.073  0.321
+  5   Character    0.520 0.480 0.950 0.620     0.529 0.533 0.652 0.605      +0.144  -0.019   3.48  0.148  1.000
+  6   Character    0.520 0.620 0.950 0.750     0.571 0.624 0.712 0.659      +0.093  +0.044   3.05  0.088  1.000
+  7   Character    0.520 0.850 0.950 1.000     0.533 0.759 0.665 0.872      +0.136  +0.109   3.25  0.039  0.198
 
-centre error   dx mean +0.158 (sd 0.091)   dy mean +0.086 (sd 0.076)
-size ratio     model width / text width: mean 3.15 (sd 1.48), range 2.00-5.67
+centre error   dx mean +0.161 (sd 0.091)   dy mean +0.079 (sd 0.066)
+size ratio     model width / text width: mean 2.84 (sd 0.62), range 2.00-3.48
+containment    of the located text inside the model's box: mean 0.504 (sd 0.467)
+               Containment is robust to OCR reading only part of a balloon,
+               which IoU is not: a box can enclose everything found and still
+               score a low IoU purely because most of the text went unread.
 
 IoU against the OCR text extent, at three padding assumptions:
-  text  +0%   mean IoU 0.078   (0 of 5 units above 0.5)
-  text +30%   mean IoU 0.112   (0 of 5 units above 0.5)
-  text +60%   mean IoU 0.138   (0 of 5 units above 0.5)
+  text  +0%   mean IoU 0.070   (0 of 5 units above 0.5)
+  text +30%   mean IoU 0.115   (0 of 5 units above 0.5)
+  text +60%   mean IoU 0.151   (0 of 5 units above 0.5)
 
 affine fit, true = a*model + b.  Both are reported because they answer
 different questions and the distinction has been conflated before:
@@ -73,42 +107,60 @@ different questions and the distinction has been conflated before:
                  larger than the text they enclose.
   over CENTRES - captures position only. a of 1 with b nonzero is a pure
                  offset, whatever the boxes' size error.
-  edges    x  a 0.699  b -0.009  R2 0.755  (n=10)
-  edges    y  a 0.925  b -0.038  R2 0.864  (n=10)
-  centres  x  a 0.951  b -0.134  R2 0.874  (n=5)
-  centres  y  a 0.978  b -0.072  R2 0.871  (n=5)
+  edges    x  a 0.661  b +0.043  R2 0.678  (n=10)
+  edges    y  a 0.806  b +0.054  R2 0.835  (n=10)
+  centres  x  a 1.060  b -0.197  R2 0.852  (n=5)
+  centres  y  a 0.874  b +0.007  R2 0.841  (n=5)
 
-sensitivity to the clustering gap (mean IoU against the text extent):
+gap independence: transcript extents identical at gaps 0.035, 0.050, 0.070 -- YES
+
+secondary, the superseded clustered ground truth (kept so these bundles
+stay comparable with numbers already published):
   gap 0.035   mean IoU 0.078   over 5 matched units
   gap 0.050   mean IoU 0.078   over 5 matched units
   gap 0.070   mean IoU 0.098   over 4 matched units
 
-VERDICT: best mean IoU 0.138 against the 0.5 stop condition -- FAIL
+VERDICT: best mean IoU 0.151 against the 0.5 stop condition -- FAIL
 
 ==============================================================================
 page-1788278845946
 ==============================================================================
 upload 902x1316  (decoded 902x1316)
 device Google Pixel 9a, sdk 37
+model (not recorded), tier (not recorded), parse v(not recorded)
 coordinates pixels (parse v5)
-8 units (8 with a box), 33 OCR words in 7 clusters, 5 matched
-coverage 62% of boxed units matched to OCR text
+
+GROUND TRUTH: OCR words aligned to the model's own transcript.
+  #   speaker      aligned  wanted   conf  used
+  0   Unknown Char       -       -      -  no  (OCR found none of its text)
+  1   Unknown Char       -       -      -  no  (OCR found none of its text)
+  2   Unknown Char       -       -      -  no  (OCR found none of its text)
+  3   Duncan             3       8   0.38  yes
+  4   Aly                7      11   0.64  yes   [dropped 'THE' as spatial outliers]
+  5   Unknown Char       2       6   0.33  yes
+  6   Unknown Char       2       5   0.40  yes
+  7   Unknown Char       2       9   0.22  NO  (below the confidence floor)
+  8 OCR words matched no unit; units never located: [0, 1, 2]
+  4 of 8 boxed units scored
 
 per unit (all figures normalised to the image, 0..1):
-  #   speaker      model box                   OCR text extent                  dx      dy    w/w    IoU
-  3   Duncan       0.310 0.236 0.527 0.312     0.201 0.319 0.300 0.356      +0.168  -0.064   2.17  0.000
-  4   Aly          0.067 0.517 0.344 0.608     0.110 0.616 0.287 0.710      +0.007  -0.101   1.56  0.000
-  5   Unknown Char 0.593 0.604 0.831 0.653     0.534 0.534 0.672 0.609      +0.109  +0.057   1.73  0.017
-  6   Unknown Char 0.599 0.707 0.837 0.752     0.578 0.648 0.718 0.664      +0.070  +0.073   1.69  0.000
-  7   Unknown Char 0.599 0.824 0.870 0.897     0.554 0.766 0.676 0.842      +0.119  +0.057   2.23  0.049
+  #   speaker      model box                   OCR text extent                  dx      dy    w/w    IoU   cont
+  3   Duncan       0.310 0.236 0.527 0.312     0.137 0.319 0.300 0.444      +0.200  -0.108   1.33  0.000  0.000
+  4   Aly          0.067 0.517 0.344 0.608     0.089 0.559 0.272 0.690      +0.025  -0.062   1.52  0.221  0.372
+  5   Unknown Char 0.593 0.604 0.831 0.653     0.534 0.554 0.633 0.609      +0.129  +0.047   2.42  0.011  0.034
+  6   Unknown Char 0.599 0.707 0.837 0.752     0.578 0.648 0.718 0.664      +0.070  +0.073   1.69  0.000  0.000
 
-centre error   dx mean +0.095 (sd 0.060)   dy mean +0.005 (sd 0.081)
-size ratio     model width / text width: mean 1.88 (sd 0.30), range 1.56-2.23
+centre error   dx mean +0.106 (sd 0.076)   dy mean -0.012 (sd 0.087)
+size ratio     model width / text width: mean 1.74 (sd 0.48), range 1.33-2.42
+containment    of the located text inside the model's box: mean 0.101 (sd 0.181)
+               Containment is robust to OCR reading only part of a balloon,
+               which IoU is not: a box can enclose everything found and still
+               score a low IoU purely because most of the text went unread.
 
 IoU against the OCR text extent, at three padding assumptions:
-  text  +0%   mean IoU 0.013   (0 of 5 units above 0.5)
-  text +30%   mean IoU 0.033   (0 of 5 units above 0.5)
-  text +60%   mean IoU 0.060   (0 of 5 units above 0.5)
+  text  +0%   mean IoU 0.058   (0 of 4 units above 0.5)
+  text +30%   mean IoU 0.089   (0 of 4 units above 0.5)
+  text +60%   mean IoU 0.109   (0 of 4 units above 0.5)
 
 affine fit, true = a*model + b.  Both are reported because they answer
 different questions and the distinction has been conflated before:
@@ -116,18 +168,17 @@ different questions and the distinction has been conflated before:
                  larger than the text they enclose.
   over CENTRES - captures position only. a of 1 with b nonzero is a pure
                  offset, whatever the boxes' size error.
-  edges    x  a 0.806  b +0.014  R2 0.909  (n=10)
-  edges    y  a 0.744  b +0.152  R2 0.889  (n=10)
-  centres  x  a 0.896  b -0.036  R2 0.937  (n=5)
-  centres  y  a 0.739  b +0.155  R2 0.891  (n=5)
+  edges    x  a 0.850  b -0.029  R2 0.890  (n=8)
+  edges    y  a 0.629  b +0.216  R2 0.866  (n=8)
+  centres  x  a 0.929  b -0.069  R2 0.908  (n=4)
+  centres  y  a 0.601  b +0.231  R2 0.908  (n=4)
 
-sensitivity to the clustering gap (mean IoU against the text extent):
+gap independence: transcript extents identical at gaps 0.035, 0.050, 0.070 -- YES
+
+secondary, the superseded clustered ground truth (kept so these bundles
+stay comparable with numbers already published):
   gap 0.035   mean IoU 0.013   over 5 matched units
   gap 0.050   mean IoU 0.118   over 4 matched units
   gap 0.070   mean IoU 0.118   over 4 matched units
-  !! a 9x spread. The OCR ground truth cannot separate this page's
-     balloons cleanly at any one gap, so treat IoU here as an order of
-     magnitude, not a figure. The size ratio and centre error above are
-     stable across gaps and are the trustworthy comparisons.
 
-VERDICT: best mean IoU 0.060 against the 0.5 stop condition -- FAIL
+VERDICT: best mean IoU 0.109 against the 0.5 stop condition -- FAIL

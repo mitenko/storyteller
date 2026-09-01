@@ -448,3 +448,90 @@ tier, 3.1x the pixel area.
 Before Stage B is measurable, the ground-truth problem in 13.3 has to be fixed.
 A 9x measurement spread cannot resolve the size of improvement Stage B would
 produce.
+
+
+---
+
+## 14. Re-baselined on a ground truth that does not depend on a parameter
+
+§13.3 left the measurement unusable: mean IoU swung 9x on one bundle depending on
+a clustering gap. The ground truth is now built differently, and the change is not
+cosmetic — **it reverses part of §13.2's conclusion.**
+
+### 14.1 How the ground truth is built now
+
+Not by grouping OCR words by distance. By aligning them to the model's own
+transcript.
+
+The model is an accurate transcriber and a poor localiser — the finding this whole
+issue rests on — so its *text* is trustworthy evidence for which words belong to
+which unit even where its *boxes* are not. Aligning the OCR word sequence against
+the transcript assigns each word to at most one unit, and a unit's text extent is
+the union of its words. **No distance threshold participates**, which the tool now
+asserts on every run by recomputing the extents at three different gaps and
+failing loudly if they differ. They do not.
+
+Two guards, both added because this failure class has now appeared four times:
+
+- **Spatial outlier rejection.** A word assigned on text alone can come from the
+  wrong balloon when the token repeats. On the Stage A bundle a single stray
+  `"THE"` widened one unit's extent from x0.25 to x0.57 and destroyed its score.
+  Outliers are measured in median absolute deviations from the unit's own words,
+  so the scale comes from the balloon rather than from a page-wide constant.
+- **Coverage reported, never hidden.** OCR reads roughly half the words on this
+  stylised lettering. Every unit's aligned-versus-wanted count and the words that
+  matched nothing are printed, so a flattering mean over two units cannot pass.
+
+### 14.2 A new metric, because IoU asks the wrong question here
+
+**Containment**: how much of the located text falls inside the box the model drew.
+
+IoU punishes a box for being larger than the bare text — but a drawn balloon
+legitimately is larger — and punishes it again when OCR reads only part of the
+words. Containment is unaffected by both, and asks the question that actually
+decides whether a crop is usable: *is the text inside the box?*
+
+### 14.3 The numbers, and the reversal
+
+| | CameraX v4 | scanner v4 | scanner v5 (Stage A) |
+|---|---|---|---|
+| units scored | 4 of 8 | 5 of 8 | 4 of 8 |
+| mean IoU (text) | 0.005 | **0.070** | 0.058 |
+| mean IoU (text +60%) | 0.021 | **0.151** | 0.109 |
+| **containment** | 0.035 | **0.504** | 0.101 |
+| box width / text width | 3.98x | 2.84x | **1.74x** |
+| centre error dx | +0.114 | +0.161 | **+0.106** |
+| centre error dy | +0.141 | +0.079 | **-0.012** |
+
+**Stage A is not ahead of the scanner v4 baseline.** It is behind it on IoU and
+five times behind on containment. §13.2 reported Stage A as an improvement; on
+this ground truth that claim does not survive, and the parts of it that do survive
+are narrower than stated.
+
+What Stage A genuinely did:
+
+- **Box size is much better** — 1.74x the text extent against 2.84x, and a drawn
+  balloon is legitimately about 1.3-1.5x. This is real and holds on every metric.
+- **The vertical offset is gone** — dy from +0.079 to -0.012.
+- **It did not put the boxes on the text.** Containment 0.101 means roughly nine
+  tenths of the located text falls *outside* the box the model drew for it. Two of
+  the four scored units have containment of exactly zero: box and text do not
+  overlap at all.
+
+The earlier, flattering reading came from a confound. Scanner v4's boxes were
+large enough (2.84x) to cover text by accident; Stage A's are correctly sized and
+land in the wrong place, so their misses are clean misses. A better-sized box that
+misses is not obviously better than a sloppy box that overlaps, and calling it an
+improvement was reading the size metric as though it were the placement metric.
+
+### 14.4 What this means for Stage B
+
+Unchanged as a plan, sharpened as a question. Stage B asks whether more input
+pixels reduce the scatter. The honest baseline it must beat is now containment
+0.504 and IoU 0.070 — the scanner v4 numbers — **not** Stage A's.
+
+If a high-resolution model does not clear that, then across a corrected protocol
+and tripled resolution the conclusion is that this model does not localise small
+stylised balloons, and §11's OCR split is the only remaining direction — with
+§13.4's warning attached, which §14.1 has now made concrete: OCR read only about
+half the words on this page and none at all of three balloons.

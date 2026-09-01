@@ -54,6 +54,32 @@ MIN_CLUSTER_ALPHA = 3
 # text with a margin, so 0% is a lower bound that no correct box could reach.
 PADDINGS = (0.0, 0.30, 0.60)
 
+# A unit whose transcript was only partly located has a fragment for an extent,
+# not a text extent, and scoring a box against a fragment is what made the first
+# CameraX fixture report a balloon as 16x too wide. Coverage, not similarity, is
+# the property that matters, so coverage is what is thresholded.
+# Coverage measures how much of a unit's text OCR managed to READ, which on
+# stylised comic lettering is around half. It is therefore a poor gate: rejecting
+# every unit below 0.5 discards balloons whose located words are perfectly good,
+# and leaves too few to measure. The floor is kept low and deliberately
+# non-decisive; coverage is printed beside every result instead, because a partial
+# extent is a lower bound on the balloon's text and the reader must see which ones
+# are partial.
+MIN_ALIGNMENT_CONFIDENCE = 0.25
+MIN_ALIGNED_WORDS = 2
+
+# What DOES gate a unit is spatial coherence. Every word of a unit comes from one
+# balloon, so a word sitting far from the rest was assigned by a coincidence of
+# text -- a repeated THE or TO -- and not by belonging there. Measured in median
+# absolute deviations from the unit's own words, so it is a robust statistic over
+# an already-assigned group, not a distance threshold over the whole page: it
+# reintroduces none of the clustering gap this task exists to remove.
+OUTLIER_MADS = 3.0
+
+# Tokens shorter than this are aligned but never counted toward confidence and
+# never alone establish an extent. "TO", "I" and "A" match everywhere.
+MIN_TOKEN_ALPHA = 3
+
 # IoU is re-reported at each of these gaps, because no single value is right for
 # a whole page. On the pages measured so far, a gap small enough to keep two
 # adjacent balloons apart also splits the lines of a third, and a gap large
@@ -225,6 +251,97 @@ def load_units(bundle, width, height):
     return units, convention
 
 
+def transcript_extents(words, units):
+    """Each unit's text extent, from aligning OCR words to the model's transcript.
+
+    The model transcribes accurately and localises poorly -- that is the central
+    finding of the issue document -- so its text is trustworthy for WHICH words
+    belong to a unit even though its boxes are not trustworthy for where they are.
+    Aligning the two token sequences assigns each OCR word to at most one unit with
+    no distance threshold anywhere, which is the entire point: the threshold was
+    worth a 9x swing in the published result.
+
+    Returns {unit_index: {"box", "aligned", "wanted", "confidence"}} for every unit
+    that received any word, INCLUDING low-confidence ones. Filtering is the
+    caller's job so that what was rejected stays visible in the report.
+    """
+    ocr_tokens = [alpha(w["text"]) for w in words]
+
+    unit_tokens, owner = [], []
+    for u in units:
+        for raw in u["text"].split():
+            t = alpha(raw)
+            if t:
+                unit_tokens.append(t)
+                owner.append(u["i"])
+
+    got = {}
+    matcher = difflib.SequenceMatcher(None, ocr_tokens, unit_tokens, autojunk=False)
+    for oi, ui, size in matcher.get_matching_blocks():
+        for k in range(size):
+            w = words[oi + k]
+            idx = owner[ui + k]
+            box = (w["x"], w["y"], w["x"] + w["w"], w["y"] + w["h"])
+            cur = got.get(idx)
+            if cur is None:
+                got[idx] = {"aligned": 0, "words": []}
+                cur = got[idx]
+            cur["aligned"] += 1
+            cur["words"].append((box, len(ocr_tokens[oi + k]) >= MIN_TOKEN_ALPHA,
+                                 words[oi + k]["text"]))
+
+    by_index = {u["i"]: u for u in units}
+    for idx, rec in got.items():
+        kept, dropped = drop_spatial_outliers(rec["words"])
+        rec["words"], rec["dropped"] = kept, dropped
+        rec["long"] = sum(1 for _, is_long, _ in kept if is_long)
+        boxes = [b for b, _, _ in kept]
+        rec["box"] = (min(b[0] for b in boxes), min(b[1] for b in boxes),
+                      max(b[2] for b in boxes), max(b[3] for b in boxes)) if boxes else None
+        wanted = [t for t in (alpha(x) for x in by_index[idx]["text"].split())
+                  if len(t) >= MIN_TOKEN_ALPHA]
+        rec["wanted"] = len(wanted)
+        rec["confidence"] = (rec["long"] / len(wanted)) if wanted else 0.0
+    return {k: v for k, v in got.items() if v["box"] is not None}
+
+
+def drop_spatial_outliers(entries):
+    """Split a unit's aligned words into those that belong and those that stray.
+
+    A word assigned by text alone can come from the wrong balloon when the token
+    repeats across the page -- on the Stage A bundle a single stray "THE" widened
+    one unit's extent from x0.25 to x0.57 and destroyed its score. Distance is
+    measured in median absolute deviations from the unit's own word centres, so
+    the scale comes from the balloon itself rather than from a page-wide constant.
+    """
+    if len(entries) <= 2:
+        return entries, []
+    cxs = sorted((b[0] + b[2]) / 2 for b, _, _ in entries)
+    cys = sorted((b[1] + b[3]) / 2 for b, _, _ in entries)
+    mx, my = cxs[len(cxs) // 2], cys[len(cys) // 2]
+    devs = [abs((b[0] + b[2]) / 2 - mx) + abs((b[1] + b[3]) / 2 - my) for b, _, _ in entries]
+    smad = sorted(devs)
+    mad = smad[len(smad) // 2] or 1.0
+    kept, dropped = [], []
+    for e, d in zip(entries, devs):
+        (kept if d <= OUTLIER_MADS * mad else dropped).append(e)
+    # Never let the filter empty a unit: if it would, the spread is the balloon.
+    return (kept, dropped) if len(kept) >= 2 else (entries, [])
+
+
+def unaligned_tokens(words, units, extents):
+    """The two lists that show whether the alignment can be believed.
+
+    Their absence is how the earlier measurements concealed their own
+    contamination: a mean IoU printed alone cannot reveal that a third of the page
+    was never located.
+    """
+    ocr_total = sum(1 for w in words if len(alpha(w["text"])) >= MIN_TOKEN_ALPHA)
+    ocr_used = sum(r["long"] for r in extents.values())
+    never_found = [u["i"] for u in units if u["i"] not in extents]
+    return ocr_total - ocr_used, never_found
+
+
 def match(clusters, units):
     """Best cluster per unit, above the similarity floor, each used once."""
     scored = []
@@ -245,6 +362,22 @@ def match(clusters, units):
         pairs.append((u, c, r))
     pairs.sort(key=lambda p: p[0]["i"])
     return pairs
+
+
+def containment(model_box, text_box):
+    """How much of the located text falls inside the model's box, 0..1.
+
+    IoU punishes a box for being larger than the text it encloses, but a drawn
+    balloon legitimately is, and it punishes it again when OCR reads only half the
+    words. Containment asks the question the reader actually cares about -- is the
+    text inside the box the model drew -- and is unaffected by both.
+    """
+    ix1, iy1 = max(model_box[0], text_box[0]), max(model_box[1], text_box[1])
+    ix2, iy2 = min(model_box[2], text_box[2]), min(model_box[3], text_box[3])
+    if ix2 <= ix1 or iy2 <= iy1:
+        return 0.0
+    area_t = max(0.0, text_box[2] - text_box[0]) * max(0.0, text_box[3] - text_box[1])
+    return ((ix2 - ix1) * (iy2 - iy1) / area_t) if area_t else 0.0
 
 
 def pad(box, fraction):
@@ -320,50 +453,73 @@ def measure(bundle, emit):
         "   MISMATCH -- meta.json disagrees with the image" if (width, height) != (ocr_w, ocr_h) else ""))
     if meta.get("device"):
         emit("device %s, sdk %s" % (meta["device"], meta.get("androidSdk", "?")))
+    emit("model %s, tier %s, parse v%s" % (
+        meta.get("modelId", "(not recorded)"),
+        meta.get("resolutionTier", "(not recorded)"),
+        meta.get("parseVersion", "(not recorded)")))
 
     units, convention = load_units(bundle, width, height)
-    clusters = cluster_words(words, ocr_w, ocr_h)
-    pairs = match(clusters, units)
-
     boxed = [u for u in units if u["box"] is not None]
     emit("coordinates %s" % convention)
-    emit("%d units (%d with a box), %d OCR words in %d clusters, %d matched"
-         % (len(units), len(boxed), len(words), len(clusters), len(pairs)))
-    if boxed:
-        emit("coverage %.0f%% of boxed units matched to OCR text"
-             % (100.0 * len(pairs) / len(boxed)))
+
+    # ---- ground truth: transcript alignment, no distance threshold ----------
+    extents = transcript_extents(words, units)
+    stray, never = unaligned_tokens(words, units, extents)
+
+    emit("")
+    emit("GROUND TRUTH: OCR words aligned to the model's own transcript.")
+    emit("  %-3s %-12s %7s %7s %6s  %s" % ("#", "speaker", "aligned", "wanted", "conf", "used"))
+    pairs = []
+    for u in boxed:
+        rec = extents.get(u["i"])
+        if rec is None:
+            emit("  %-3d %-12s %7s %7s %6s  no  (OCR found none of its text)"
+                 % (u["i"], u["speaker"][:12], "-", "-", "-"))
+            continue
+        ok = rec["confidence"] >= MIN_ALIGNMENT_CONFIDENCE and rec["long"] >= MIN_ALIGNED_WORDS
+        note = "yes" if ok else "NO  (below the confidence floor)"
+        if rec["dropped"]:
+            note += "   [dropped %s as spatial outliers]" % (
+                ", ".join(repr(t) for _, _, t in rec["dropped"]))
+        emit("  %-3d %-12s %7d %7d %6.2f  %s" % (
+            u["i"], u["speaker"][:12], rec["long"], rec["wanted"], rec["confidence"], note))
+        if ok:
+            pairs.append((u, rec["box"]))
+
+    emit("  %d OCR words matched no unit; units never located: %s"
+         % (stray, never if never else "none"))
+    emit("  %d of %d boxed units scored" % (len(pairs), len(boxed)))
+
     if not pairs:
         emit("")
-        emit("NOTHING MATCHED -- no measurement is possible from this bundle.")
+        emit("NOTHING SCORED -- no measurement is possible from this bundle.")
         return
 
     emit("")
     emit("per unit (all figures normalised to the image, 0..1):")
-    emit("  %-3s %-12s %-27s %-27s %7s %7s %6s %6s"
-         % ("#", "speaker", "model box", "OCR text extent", "dx", "dy", "w/w", "IoU"))
+    emit("  %-3s %-12s %-27s %-27s %7s %7s %6s %6s %6s"
+         % ("#", "speaker", "model box", "OCR text extent", "dx", "dy", "w/w", "IoU", "cont"))
 
-    dxs, dys, ratios, ious = [], [], [], []
+    dxs, dys, ratios, ious, conts = [], [], [], [], []
     fx, fy, cx, cy = [], [], [], []
-    for u, c, r in pairs:
+    for u, t in pairs:
         m = u["box"]
-        t = (c["x1"], c["y1"], c["x2"], c["y2"])
         mcx, mcy = (m[0] + m[2]) / 2 / width, (m[1] + m[3]) / 2 / height
         tcx, tcy = (t[0] + t[2]) / 2 / width, (t[1] + t[3]) / 2 / height
         dx, dy = mcx - tcx, mcy - tcy
-        mw = (m[2] - m[0]) or 1e-9
-        tw = (t[2] - t[0]) or 1e-9
-        ratio = mw / tw
+        ratio = ((m[2] - m[0]) or 1e-9) / ((t[2] - t[0]) or 1e-9)
         v = iou(m, t)
+        conts.append(containment(m, t))
         dxs.append(dx); dys.append(dy); ratios.append(ratio); ious.append(v)
         fx.append((m[0] / width, t[0] / width)); fx.append((m[2] / width, t[2] / width))
         fy.append((m[1] / height, t[1] / height)); fy.append((m[3] / height, t[3] / height))
         cx.append((mcx, tcx)); cy.append((mcy, tcy))
 
-        emit("  %-3d %-12s %-27s %-27s %+7.3f %+7.3f %6.2f %6.3f" % (
+        emit("  %-3d %-12s %-27s %-27s %+7.3f %+7.3f %6.2f %6.3f %6.3f" % (
             u["i"], u["speaker"][:12],
             "%.3f %.3f %.3f %.3f" % (m[0] / width, m[1] / height, m[2] / width, m[3] / height),
             "%.3f %.3f %.3f %.3f" % (t[0] / width, t[1] / height, t[2] / width, t[3] / height),
-            dx, dy, ratio, v))
+            dx, dy, ratio, v, conts[-1]))
 
     emit("")
     mdx, sdx = mean_sd(dxs)
@@ -372,14 +528,21 @@ def measure(bundle, emit):
     emit("centre error   dx mean %+.3f (sd %.3f)   dy mean %+.3f (sd %.3f)" % (mdx, sdx, mdy, sdy))
     emit("size ratio     model width / text width: mean %.2f (sd %.2f), range %.2f-%.2f"
          % (mr, sr, min(ratios), max(ratios)))
+    mc, sc = mean_sd(conts)
+    emit("containment    of the located text inside the model's box: mean %.3f (sd %.3f)" % (mc, sc))
+    emit("               Containment is robust to OCR reading only part of a balloon,")
+    emit("               which IoU is not: a box can enclose everything found and still")
+    emit("               score a low IoU purely because most of the text went unread.")
 
     emit("")
     emit("IoU against the OCR text extent, at three padding assumptions:")
-    for p in PADDINGS:
-        vals = [iou(u["box"], pad((c["x1"], c["y1"], c["x2"], c["y2"]), p)) for u, c, _ in pairs]
+    padded_means = []
+    for pfrac in PADDINGS:
+        vals = [iou(u["box"], pad(t, pfrac)) for u, t in pairs]
         m, _ = mean_sd(vals)
+        padded_means.append(m)
         emit("  text %+3.0f%%   mean IoU %.3f   (%d of %d units above 0.5)"
-             % (p * 100, m, sum(1 for v in vals if v >= 0.5), len(vals)))
+             % (pfrac * 100, m, sum(1 for v in vals if v >= 0.5), len(vals)))
 
     emit("")
     emit("affine fit, true = a*model + b.  Both are reported because they answer")
@@ -388,38 +551,46 @@ def measure(bundle, emit):
     emit("                 larger than the text they enclose.")
     emit("  over CENTRES - captures position only. a of 1 with b nonzero is a pure")
     emit("                 offset, whatever the boxes' size error.")
-    for label, dx_pairs, dy_pairs in (("edges", fx, fy), ("centres", cx, cy)):
-        ax, bx, r2x, nx = fit(dx_pairs)
-        ay, by, r2y, ny = fit(dy_pairs)
+    for label, dxp, dyp in (("edges", fx, fy), ("centres", cx, cy)):
+        ax, bx, r2x, nx = fit(dxp)
+        ay, by, r2y, ny = fit(dyp)
         emit("  %-8s x  a %.3f  b %+.3f  R2 %.3f  (n=%d)" % (label, ax, bx, r2x, nx))
         emit("  %-8s y  a %.3f  b %+.3f  R2 %.3f  (n=%d)" % (label, ay, by, r2y, ny))
 
-    emit("")
-    emit("sensitivity to the clustering gap (mean IoU against the text extent):")
-    spread = []
+    # ---- the transcript ground truth must not depend on the clustering gap --
     saved = globals()["CLUSTER_GAP"]
+    probe = []
     for g in SENSITIVITY_GAPS:
         globals()["CLUSTER_GAP"] = g
-        alt_pairs = match(cluster_words(words, ocr_w, ocr_h), units)
-        if not alt_pairs:
+        probe.append(transcript_extents(words, units))
+    globals()["CLUSTER_GAP"] = saved
+    stable = all(
+        {k: v["box"] for k, v in probe[0].items()} == {k: v["box"] for k, v in q.items()}
+        for q in probe[1:])
+    emit("")
+    emit("gap independence: transcript extents identical at gaps %s -- %s"
+         % (", ".join("%.3f" % g for g in SENSITIVITY_GAPS), "YES" if stable else "NO"))
+    if not stable:
+        emit("  !! FAIL. The transcript alignment is reading clustering state from")
+        emit("     somewhere. Every number above is void until that is found.")
+
+    # ---- secondary: the old clustered ground truth, for continuity ----------
+    emit("")
+    emit("secondary, the superseded clustered ground truth (kept so these bundles")
+    emit("stay comparable with numbers already published):")
+    for g in SENSITIVITY_GAPS:
+        globals()["CLUSTER_GAP"] = g
+        alt = match(cluster_words(words, ocr_w, ocr_h), units)
+        if not alt:
             emit("  gap %.3f   no matches" % g)
             continue
-        vals = [iou(u["box"], (c["x1"], c["y1"], c["x2"], c["y2"])) for u, c, _ in alt_pairs]
+        vals = [iou(u["box"], (c["x1"], c["y1"], c["x2"], c["y2"])) for u, c, _ in alt]
         m, _ = mean_sd(vals)
-        spread.append(m)
-        emit("  gap %.3f   mean IoU %.3f   over %d matched units" % (g, m, len(alt_pairs)))
+        emit("  gap %.3f   mean IoU %.3f   over %d matched units" % (g, m, len(alt)))
     globals()["CLUSTER_GAP"] = saved
-    if spread and min(spread) > 0 and max(spread) / min(spread) >= 3:
-        emit("  !! a %.0fx spread. The OCR ground truth cannot separate this page's"
-             % (max(spread) / min(spread)))
-        emit("     balloons cleanly at any one gap, so treat IoU here as an order of")
-        emit("     magnitude, not a figure. The size ratio and centre error above are")
-        emit("     stable across gaps and are the trustworthy comparisons.")
 
     emit("")
-    best = max(
-        (sum(iou(u["box"], pad((c["x1"], c["y1"], c["x2"], c["y2"]), p)) for u, c, _ in pairs) / len(pairs))
-        for p in PADDINGS)
+    best = max(padded_means)
     emit("VERDICT: best mean IoU %.3f against the 0.5 stop condition -- %s"
          % (best, "PASS" if best >= 0.5 else "FAIL"))
 
