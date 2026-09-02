@@ -2,4 +2,6 @@
 <resources>
     <color name="storyteller_ink">#FF1B2A4A</color>
     <color name="storyteller_page">#FFFDFBF6</color>
+    <!-- Matches NightGround in ui/theme/Color.kt; keep the two in step. -->
+    <color name="storyteller_night">#FF10141F</color>
 </resources>

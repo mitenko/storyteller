@@ -32,33 +32,20 @@ class CaptureViewModelTest {
             .toByteArray()
     }
 
-    @Test fun `starts in PermissionRequired until permission is granted`() = runTest {
-        val vm = CaptureViewModel(RecordingPipeline())
-        assertEquals(CaptureUiState.PermissionRequired, vm.uiState.value)
-        vm.onPermissionResult(granted = true)
-        assertEquals(CaptureUiState.Framing, vm.uiState.value)
+    @Test fun `starts idle, with no permission gate in the way`() = runTest {
+        assertEquals(CaptureUiState.Idle, CaptureViewModel(RecordingPipeline()).uiState.value)
     }
 
-    @Test fun `denied permission stays in PermissionRequired`() = runTest {
+    @Test fun `a scanned page moves to Captured`() = runTest {
         val vm = CaptureViewModel(RecordingPipeline())
-        vm.onPermissionResult(granted = false)
-        assertEquals(CaptureUiState.PermissionRequired, vm.uiState.value)
-    }
-
-    @Test fun `capture moves to Captured and retake returns to Framing`() = runTest {
-        val vm = CaptureViewModel(RecordingPipeline())
-        vm.onPermissionResult(true)
-        vm.onCaptured(jpeg())
+        vm.onScanned(jpeg())
         assertTrue(vm.uiState.value is CaptureUiState.Captured)
-        vm.onRetake()
-        assertEquals(CaptureUiState.Framing, vm.uiState.value)
     }
 
-    @Test fun `confirm starts the pipeline with a downscaled image`() = runTest {
+    @Test fun `confirm starts the pipeline with the scanned image`() = runTest {
         val pipeline = RecordingPipeline()
         val vm = CaptureViewModel(pipeline)
-        vm.onPermissionResult(true)
-        vm.onCaptured(jpeg())
+        vm.onScanned(jpeg())
         vm.onConfirm()
 
         assertEquals(1, pipeline.started.size)
@@ -66,28 +53,70 @@ class CaptureViewModelTest {
         assertTrue(pipeline.started.single().bytes.isNotEmpty())
     }
 
-    @Test fun `confirm before capture does nothing`() = runTest {
+    @Test fun `confirm before any scan does nothing`() = runTest {
         val pipeline = RecordingPipeline()
-        val vm = CaptureViewModel(pipeline)
-        vm.onPermissionResult(true)
-        vm.onConfirm()
+        CaptureViewModel(pipeline).onConfirm()
         assertTrue(pipeline.started.isEmpty())
     }
 
-    @Test fun `retake resets the pipeline so a stale page cannot be shown`() = runTest {
+    @Test fun `retake returns to Idle and resets the pipeline so a stale page cannot be shown`() = runTest {
         val pipeline = RecordingPipeline()
         val vm = CaptureViewModel(pipeline)
-        vm.onPermissionResult(true)
-        vm.onCaptured(jpeg())
+        vm.onScanned(jpeg())
         vm.onRetake()
+
+        assertEquals(CaptureUiState.Idle, vm.uiState.value)
         assertEquals(1, pipeline.resets)
+    }
+
+    @Test fun `a failed scan surfaces the reason rather than failing silently`() = runTest {
+        val vm = CaptureViewModel(RecordingPipeline())
+        vm.onScanFailed("The scanner could not start.")
+        assertEquals(CaptureUiState.Failed("The scanner could not start."), vm.uiState.value)
+    }
+
+    @Test fun `a failed scan discards an earlier page so it cannot be confirmed by mistake`() = runTest {
+        val pipeline = RecordingPipeline()
+        val vm = CaptureViewModel(pipeline)
+        vm.onScanned(jpeg())
+        vm.onScanFailed("The scanner could not start.")
+
+        assertTrue(vm.uiState.value is CaptureUiState.Failed)
+        vm.onConfirm()
+        assertTrue("a discarded page must not be confirmable", pipeline.started.isEmpty())
+        assertEquals("replacing a captured page must reset the pipeline", 1, pipeline.resets)
+    }
+
+    @Test fun `cancelling from Idle changes nothing and does not reset the pipeline`() = runTest {
+        val pipeline = RecordingPipeline()
+        val vm = CaptureViewModel(pipeline)
+        vm.onScanCancelled()
+
+        assertEquals(CaptureUiState.Idle, vm.uiState.value)
+        assertEquals("backing out of a scan has nothing to reset", 0, pipeline.resets)
+    }
+
+    @Test fun `cancelling keeps a page already on screen`() = runTest {
+        val pipeline = RecordingPipeline()
+        val vm = CaptureViewModel(pipeline)
+        vm.onScanned(jpeg())
+        vm.onScanCancelled()
+
+        assertTrue(vm.uiState.value is CaptureUiState.Captured)
+        assertEquals(0, pipeline.resets)
+    }
+
+    @Test fun `cancelling clears a failure banner`() = runTest {
+        val vm = CaptureViewModel(RecordingPipeline())
+        vm.onScanFailed("The scanner could not start.")
+        vm.onScanCancelled()
+        assertEquals(CaptureUiState.Idle, vm.uiState.value)
     }
 
     @Test fun `confirmAndNavigate starts the pipeline before navigating away`() = runTest {
         val pipeline = RecordingPipeline()
         val vm = CaptureViewModel(pipeline)
-        vm.onPermissionResult(true)
-        vm.onCaptured(jpeg())
+        vm.onScanned(jpeg())
 
         var pipelineWasRunningWhenNavigated = false
         confirmAndNavigate(vm) {

@@ -6,8 +6,16 @@
         sits above the camera preview and steals the top of every screen. Compose
         supplies all the real styling (StorytellerTheme), so this only has to remove
         the action bar and paint a sensible window background under the first frame.
+
+        The background is dark UNCONDITIONALLY, and there is deliberately no
+        values-night variant. The theme is an in-app three-way setting, but this
+        window is painted before Compose runs and before Room has answered - and a
+        resource qualifier could not help anyway, since values-night follows the
+        DEVICE's setting while ours may override it. Dark is the app's default and
+        therefore right on the common path; a Light user sees one dark frame on a
+        cold start, which is the accepted cost of not being able to know sooner.
     -->
-    <style name="Theme.Storyteller" parent="@android:style/Theme.Material.Light.NoActionBar">
-        <item name="android:windowBackground">@color/storyteller_page</item>
+    <style name="Theme.Storyteller" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/storyteller_night</item>
     </style>
 </resources>

@@ -4,17 +4,22 @@ import android.content.Context
 import com.storyteller.data.audio.AudioRepositoryImpl
 import com.storyteller.data.audio.ElevenLabsTtsApi
 import com.storyteller.data.audio.PagePlayerImpl
+import com.storyteller.data.diagnostics.DiagnosticWriter
+import com.storyteller.data.diagnostics.DiagnosticWriterImpl
 import com.storyteller.data.local.CachedAudioDao
 import com.storyteller.data.local.ParsedPageDao
+import com.storyteller.data.local.SettingsDao
 import com.storyteller.data.local.VoiceDao
 import com.storyteller.data.local.VoiceListDao
 import com.storyteller.data.page.ClaudeApi
 import com.storyteller.data.page.PageReaderImpl
+import com.storyteller.data.settings.SettingsRepositoryImpl
 import com.storyteller.data.voice.ElevenLabsVoiceApi
 import com.storyteller.data.voice.VoiceRepositoryImpl
 import com.storyteller.domain.repository.AudioRepository
 import com.storyteller.domain.repository.PagePlayer
 import com.storyteller.domain.repository.PageReader
+import com.storyteller.domain.repository.SettingsRepository
 import com.storyteller.domain.repository.VoiceRepository
 import dagger.Module
 import dagger.Provides
@@ -31,8 +36,16 @@ import javax.inject.Singleton
 object RepositoryModule {
 
     @Provides @Singleton
-    fun pageReader(api: ClaudeApi, dao: ParsedPageDao, json: Json): PageReader =
-        PageReaderImpl(api, dao, json)
+    fun diagnosticWriter(@Named("diagnosticsDir") dir: File): DiagnosticWriter =
+        DiagnosticWriterImpl(dir)
+
+    @Provides @Singleton
+    fun pageReader(
+        api: ClaudeApi,
+        dao: ParsedPageDao,
+        json: Json,
+        diagnostics: DiagnosticWriter,
+    ): PageReader = PageReaderImpl(api, dao, json, diagnostics)
 
     @Provides @Singleton
     fun voiceRepository(
@@ -58,4 +71,7 @@ object RepositoryModule {
      */
     @Provides @Singleton
     fun pagePlayer(@ApplicationContext ctx: Context): PagePlayer = PagePlayerImpl(ctx)
+
+    @Provides @Singleton
+    fun settingsRepository(dao: SettingsDao): SettingsRepository = SettingsRepositoryImpl(dao)
 }

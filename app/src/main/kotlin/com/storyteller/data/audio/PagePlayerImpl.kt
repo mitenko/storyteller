@@ -64,7 +64,7 @@ class PagePlayerImpl(context: Context) : PagePlayer {
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     _state.value = when (playbackState) {
                         Player.STATE_ENDED -> if (pageComplete) PlaybackState.Finished else _state.value
-                        Player.STATE_READY -> if (isPlaying) PlaybackState.Playing else _state.value
+                        Player.STATE_READY -> if (isPlaying) PlaybackState.Playing(currentMediaItemIndex) else _state.value
                         else -> _state.value
                     }
                 }
@@ -87,6 +87,12 @@ class PagePlayerImpl(context: Context) : PagePlayer {
                 // preserved instead of only checking the eventual item count.
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                     visitedIndices.add(currentMediaItemIndex)
+                    // Republish so a consumer following along knows which item is
+                    // sounding now; without this the index only ever reports the
+                    // item play() started on.
+                    if (_state.value is PlaybackState.Playing) {
+                        _state.value = PlaybackState.Playing(currentMediaItemIndex)
+                    }
                 }
             },
         )
@@ -97,7 +103,7 @@ class PagePlayerImpl(context: Context) : PagePlayer {
         player.setMediaItems(units.map { it.mediaItem() })
         player.prepare()
         player.play()
-        _state.value = PlaybackState.Playing
+        _state.value = PlaybackState.Playing(player.currentMediaItemIndex)
     }
 
     /** Appended at the end, so reading order is preserved as units arrive. */

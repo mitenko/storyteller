@@ -4,22 +4,35 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import com.storyteller.domain.ReadingPipeline
+import com.storyteller.domain.pageImage
+import com.storyteller.domain.speechUnit
+import com.storyteller.domain.model.BoundingBox
 import com.storyteller.domain.model.FailureReason
 import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.PipelineState
 import com.storyteller.domain.model.PlaybackState
 import com.storyteller.domain.model.PreparedUnit
+import com.storyteller.domain.model.ReadingMode
+import com.storyteller.domain.model.ThemeChoice
 import com.storyteller.domain.model.SpeechUnit
 import com.storyteller.domain.repository.PagePlayer
+import com.storyteller.domain.repository.SettingsRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.yield
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -34,6 +47,51 @@ class FakePipeline : ReadingPipeline {
     override fun start(image: PageImage) = Unit
     override fun retry() { retries++ }
     override fun reset() = Unit
+
+    /** Convenience for tests that only care about pushing one state at a time. */
+    fun emit(state: PipelineState) { states.value = state }
+}
+
+class FakeSettingsRepository(initial: ReadingMode = ReadingMode.Auto) : SettingsRepository {
+    private val modes = MutableStateFlow(initial)
+
+    /**
+     * A bare MutableStateFlow replays its current value SYNCHRONOUSLY on first
+     * collection, with no suspension point before that first emit - which cannot
+     * reproduce the start-up race this fake exists to test, because the real
+     * Room-backed Flow's first emission is asynchronous. `yield()` before
+     * `emitAll` forces at least one real suspension point, so a naive
+     * implementation that starts collecting pipeline.state before this flow has
+     * emitted will observe a pipeline state while `mode` is still unset/default.
+     */
+    override val mode: Flow<ReadingMode> = flow {
+        yield()
+        emitAll(modes)
+    }
+
+    override suspend fun setMode(mode: ReadingMode) { modes.value = mode }
+    override val theme: Flow<ThemeChoice> = flowOf(ThemeChoice.Dark)
+    override suspend fun setTheme(theme: ThemeChoice) = Unit
+}
+
+/**
+ * Emits once successfully then throws on EVERY collection. `settings.mode` is
+ * collected twice by ReaderViewModel's init - once via `.first()` (which
+ * cancels the flow right after that first emission, so the throw never fires
+ * for that collection) and once by the sibling `launch { ... collect { } }`
+ * (a fresh, independent collection that runs the emit-then-throw body in
+ * full). This is what F1 pins: a fault surfacing AFTER that sibling's first
+ * emission must not cancel the coroutine that also runs pipeline.state.collect.
+ */
+class ThrowsAfterFirstEmissionSettingsRepository : SettingsRepository {
+    override val mode: Flow<ReadingMode> = flow {
+        emit(ReadingMode.Auto)
+        throw RuntimeException("settings fault after first emission")
+    }
+
+    override suspend fun setMode(mode: ReadingMode) = Unit
+    override val theme: Flow<ThemeChoice> = flowOf(ThemeChoice.Dark)
+    override suspend fun setTheme(theme: ThemeChoice) = Unit
 }
 
 class FakePlayer : PagePlayer {
@@ -67,10 +125,38 @@ class FakePlayer : PagePlayer {
     }
 }
 
+/** Records the whole unit list passed to each play() call, so tap mode's one-unit playlists are visible. */
+class RecordingPlayer : PagePlayer {
+    override val state = MutableStateFlow<PlaybackState>(PlaybackState.Idle)
+    val played = mutableListOf<List<PreparedUnit>>()
+    val appended = mutableListOf<PreparedUnit>()
+    var stops = 0
+    var endOfPageCalls = 0
+
+    override fun play(units: List<PreparedUnit>) {
+        played += units
+    }
+
+    override fun append(unit: PreparedUnit) {
+        appended += unit
+    }
+
+    override fun endOfPage() {
+        endOfPageCalls++
+    }
+
+    override fun stop() {
+        stops++
+    }
+}
+
 @OptIn(ExperimentalCoroutinesApi::class)
 class ReaderViewModelTest {
 
     private val dispatcher = StandardTestDispatcher()
+
+    /** Shared by the mode-aware tests below via [readerViewModel]; each test gets its own instance. */
+    private val pipeline = FakePipeline()
 
     @Before fun setUp() = Dispatchers.setMain(dispatcher)
     @After fun tearDown() = Dispatchers.resetMain()
@@ -81,19 +167,44 @@ class ReaderViewModelTest {
         audio = File("/tmp/$index.mp3"),
     )
 
+    /** Placeholder units standing in for a page of [total] lines; only the count matters here. */
+    private fun speechUnits(total: Int): List<SpeechUnit> =
+        List(total) { SpeechUnit(it, "Wolf", "line $it", null) }
+
+    private fun preparedUnits(total: Int): List<PreparedUnit> = List(total) { prepared(it) }
+
+    /** Builds a ViewModel wired to the shared [pipeline] and a fake SettingsRepository fixed to [mode]. */
+    private fun readerViewModel(
+        player: PagePlayer,
+        mode: ReadingMode = ReadingMode.Auto,
+    ): ReaderViewModel = ReaderViewModel(pipeline, player, FakeSettingsRepository(mode))
+
+    /** Drives the shared [pipeline] straight to Ready with [units] and reads back the resulting Playing state. */
+    private suspend fun TestScope.playingStateFor(units: List<SpeechUnit>): ReaderUiState.Playing {
+        val vm = readerViewModel(RecordingPlayer())
+        val prepared = units.map { PreparedUnit(unit = it, voiceId = "v", audio = File("/tmp/${it.index}.mp3")) }
+        pipeline.emit(PipelineState.Ready(prepared, image = null))
+        advanceUntilIdle()
+        return vm.uiState.value as ReaderUiState.Playing
+    }
+
     @Test fun `maps pipeline states to reader states`() = runTest(dispatcher) {
         val pipeline = FakePipeline()
-        val vm = ReaderViewModel(pipeline, FakePlayer())
+        val vm = ReaderViewModel(pipeline, FakePlayer(), FakeSettingsRepository())
 
         pipeline.states.value = PipelineState.Reading
         runCurrent()
         assertEquals(ReaderUiState.ReadingPage, vm.uiState.value)
 
-        pipeline.states.value = PipelineState.Preparing(listOf(prepared(0)), total = 3)
+        pipeline.states.value = PipelineState.Preparing(speechUnits(3), ready = listOf(prepared(0)), image = null)
         runCurrent()
-        assertEquals(ReaderUiState.PreparingVoices(ready = 1, total = 3), vm.uiState.value)
+        val preparing = vm.uiState.value as ReaderUiState.Playing
+        assertEquals(3, preparing.lines.size)
+        // F7: Auto rows grey by readiness just like Tap rows do; only unit 0 is
+        // ready here.
+        assertEquals(listOf(true, false, false), preparing.lines.map { it.audioReady })
 
-        pipeline.states.value = PipelineState.Ready(listOf(prepared(0), prepared(1)))
+        pipeline.states.value = PipelineState.Ready(listOf(prepared(0), prepared(1)), image = null)
         runCurrent()
         val playing = vm.uiState.value as ReaderUiState.Playing
         assertEquals(listOf("line 0", "line 1"), playing.lines.map { it.text })
@@ -104,14 +215,14 @@ class ReaderViewModelTest {
         runTest(dispatcher) {
             val pipeline = FakePipeline()
             val player = FakePlayer()
-            ReaderViewModel(pipeline, player)
+            ReaderViewModel(pipeline, player, FakeSettingsRepository())
 
-            pipeline.states.value = PipelineState.Preparing(listOf(prepared(0)), 3)
+            pipeline.states.value = PipelineState.Preparing(speechUnits(3), listOf(prepared(0)), image = null)
             runCurrent()
-            pipeline.states.value = PipelineState.Preparing(listOf(prepared(0), prepared(1)), 3)
+            pipeline.states.value = PipelineState.Preparing(speechUnits(3), listOf(prepared(0), prepared(1)), image = null)
             runCurrent()
             pipeline.states.value =
-                PipelineState.Preparing(listOf(prepared(0), prepared(1), prepared(2)), 3)
+                PipelineState.Preparing(speechUnits(3), listOf(prepared(0), prepared(1), prepared(2)), image = null)
             runCurrent()
 
             assertEquals("first unit starts playback", listOf(0), player.played)
@@ -122,11 +233,11 @@ class ReaderViewModelTest {
         runTest(dispatcher) {
             val pipeline = FakePipeline()
             val player = FakePlayer()
-            ReaderViewModel(pipeline, player)
+            ReaderViewModel(pipeline, player, FakeSettingsRepository())
 
-            pipeline.states.value = PipelineState.Preparing(listOf(prepared(0), prepared(1)), 2)
+            pipeline.states.value = PipelineState.Preparing(speechUnits(2), listOf(prepared(0), prepared(1)), image = null)
             runCurrent()
-            pipeline.states.value = PipelineState.Ready(listOf(prepared(0), prepared(1)))
+            pipeline.states.value = PipelineState.Ready(listOf(prepared(0), prepared(1)), image = null)
             runCurrent()
 
             assertEquals(listOf(0), player.played)
@@ -142,10 +253,10 @@ class ReaderViewModelTest {
             // single newest one.
             val pipeline = FakePipeline()
             val player = FakePlayer()
-            ReaderViewModel(pipeline, player)
+            ReaderViewModel(pipeline, player, FakeSettingsRepository())
 
             pipeline.states.value =
-                PipelineState.Ready(listOf(prepared(0), prepared(1), prepared(2)))
+                PipelineState.Ready(listOf(prepared(0), prepared(1), prepared(2)), image = null)
             runCurrent()
 
             assertEquals(listOf(0), player.played)
@@ -157,12 +268,12 @@ class ReaderViewModelTest {
         runTest(dispatcher) {
             val pipeline = FakePipeline()
             val player = FakePlayer()
-            ReaderViewModel(pipeline, player)
+            ReaderViewModel(pipeline, player, FakeSettingsRepository())
 
-            pipeline.states.value = PipelineState.Preparing(listOf(prepared(0), prepared(1)), 3)
+            pipeline.states.value = PipelineState.Preparing(speechUnits(3), listOf(prepared(0), prepared(1)), image = null)
             runCurrent()
             pipeline.states.value =
-                PipelineState.Ready(listOf(prepared(0), prepared(1), prepared(2)))
+                PipelineState.Ready(listOf(prepared(0), prepared(1), prepared(2)), image = null)
             runCurrent()
 
             assertEquals(1, player.endOfPageCalls)
@@ -176,7 +287,7 @@ class ReaderViewModelTest {
         runTest(dispatcher) {
             val pipeline = FakePipeline()
             val player = FakePlayer()
-            val vm = ReaderViewModel(pipeline, player)
+            val vm = ReaderViewModel(pipeline, player, FakeSettingsRepository())
 
             pipeline.states.value = PipelineState.Failed(FailureReason.NoTextFound, retryable = true)
             runCurrent()
@@ -202,12 +313,12 @@ class ReaderViewModelTest {
             // left over from page one and silently skip every one of its own units.
             val pipeline = FakePipeline()
             val player = FakePlayer()
-            ReaderViewModel(pipeline, player)
+            ReaderViewModel(pipeline, player, FakeSettingsRepository())
 
             // Page one, start to finish.
-            pipeline.states.value = PipelineState.Preparing(listOf(prepared(0), prepared(1)), 2)
+            pipeline.states.value = PipelineState.Preparing(speechUnits(2), listOf(prepared(0), prepared(1)), image = null)
             runCurrent()
-            pipeline.states.value = PipelineState.Ready(listOf(prepared(0), prepared(1)))
+            pipeline.states.value = PipelineState.Ready(listOf(prepared(0), prepared(1)), image = null)
             runCurrent()
 
             // Page two, on the same ViewModel. ReadingPipelineImpl publishes Reading
@@ -215,9 +326,9 @@ class ReaderViewModelTest {
             // units of its own.
             pipeline.states.value = PipelineState.Reading
             runCurrent()
-            pipeline.states.value = PipelineState.Preparing(listOf(prepared(0), prepared(1)), 2)
+            pipeline.states.value = PipelineState.Preparing(speechUnits(2), listOf(prepared(0), prepared(1)), image = null)
             runCurrent()
-            pipeline.states.value = PipelineState.Ready(listOf(prepared(0), prepared(1)))
+            pipeline.states.value = PipelineState.Ready(listOf(prepared(0), prepared(1)), image = null)
             runCurrent()
 
             assertEquals(
@@ -236,15 +347,15 @@ class ReaderViewModelTest {
     @Test fun `player state reaches the playing ui state`() = runTest(dispatcher) {
         val pipeline = FakePipeline()
         val player = FakePlayer()
-        val vm = ReaderViewModel(pipeline, player)
+        val vm = ReaderViewModel(pipeline, player, FakeSettingsRepository())
 
-        pipeline.states.value = PipelineState.Ready(listOf(prepared(0)))
+        pipeline.states.value = PipelineState.Ready(listOf(prepared(0)), image = null)
         runCurrent()
         assertEquals(PlaybackState.Idle, (vm.uiState.value as ReaderUiState.Playing).playback)
 
-        player.state.value = PlaybackState.Playing
+        player.state.value = PlaybackState.Playing(0)
         runCurrent()
-        assertEquals(PlaybackState.Playing, (vm.uiState.value as ReaderUiState.Playing).playback)
+        assertEquals(PlaybackState.Playing(0), (vm.uiState.value as ReaderUiState.Playing).playback)
 
         player.state.value = PlaybackState.Finished
         runCurrent()
@@ -254,9 +365,9 @@ class ReaderViewModelTest {
     @Test fun `player state does not overwrite a later error screen`() = runTest(dispatcher) {
         val pipeline = FakePipeline()
         val player = FakePlayer()
-        val vm = ReaderViewModel(pipeline, player)
+        val vm = ReaderViewModel(pipeline, player, FakeSettingsRepository())
 
-        pipeline.states.value = PipelineState.Ready(listOf(prepared(0)))
+        pipeline.states.value = PipelineState.Ready(listOf(prepared(0)), image = null)
         runCurrent()
         pipeline.states.value = PipelineState.Failed(FailureReason.Network, retryable = true)
         runCurrent()
@@ -268,7 +379,7 @@ class ReaderViewModelTest {
 
     @Test fun `each failure reason gets its own message`() = runTest(dispatcher) {
         val pipeline = FakePipeline()
-        val vm = ReaderViewModel(pipeline, FakePlayer())
+        val vm = ReaderViewModel(pipeline, FakePlayer(), FakeSettingsRepository())
         val messages = mutableSetOf<String>()
 
         FailureReason.entries.forEach { reason ->
@@ -290,7 +401,7 @@ class ReaderViewModelTest {
      */
     @Test fun `clearing the ViewModel store stops the player`() = runTest(dispatcher) {
         val player = FakePlayer()
-        val vm = ReaderViewModel(FakePipeline(), player)
+        val vm = ReaderViewModel(FakePipeline(), player, FakeSettingsRepository())
         val store = ViewModelStore()
         ViewModelProvider(
             store,
@@ -304,5 +415,480 @@ class ReaderViewModelTest {
         assertEquals("nothing has ended the reader yet", 0, player.stops)
         store.clear()
         assertEquals("popping the reader entry must stop playback", 1, player.stops)
+    }
+
+    // --- Mode-aware behaviour (Task 8) ---------------------------------------
+
+    @Test fun `tap mode does not start playback on its own`() = runTest {
+        val player = RecordingPlayer()
+        readerViewModel(player, mode = ReadingMode.Tap)
+        pipeline.emit(PipelineState.Ready(preparedUnits(2), image = null))
+        advanceUntilIdle()
+
+        assertTrue("tap mode must not autoplay", player.played.isEmpty())
+    }
+
+    @Test fun `auto mode still plays as it always did`() = runTest {
+        val player = RecordingPlayer()
+        readerViewModel(player, mode = ReadingMode.Auto)
+        pipeline.emit(PipelineState.Ready(preparedUnits(2), image = null))
+        advanceUntilIdle()
+
+        assertEquals(1, player.played.size)
+    }
+
+    @Test fun `auto mode follows the player's playlist index`() = runTest {
+        val player = RecordingPlayer()
+        val vm = readerViewModel(player, mode = ReadingMode.Auto)
+        pipeline.emit(PipelineState.Ready(preparedUnits(3), image = null))
+        advanceUntilIdle()
+
+        // Auto builds one playlist per page in reading order from unit 0, so the
+        // player's position IS the unit index there.
+        player.state.value = PlaybackState.Playing(2)
+        advanceUntilIdle()
+
+        assertEquals(2, (vm.uiState.value as ReaderUiState.Playing).playingIndex)
+    }
+
+    @Test fun `tap mode ignores the player's playlist index`() = runTest {
+        val player = RecordingPlayer()
+        val vm = readerViewModel(player, mode = ReadingMode.Tap)
+        pipeline.emit(PipelineState.Ready(preparedUnits(3), image = null))
+        advanceUntilIdle()
+
+        vm.onLineTapped(2)
+        advanceUntilIdle()
+
+        // Tap plays a ONE-ITEM playlist, so the player always reports position 0.
+        // Trusting it here would highlight line 0 for every tap.
+        player.state.value = PlaybackState.Playing(0)
+        advanceUntilIdle()
+
+        assertEquals(2, (vm.uiState.value as ReaderUiState.Playing).playingIndex)
+    }
+
+    @Test fun `tapping a line calls endOfPage and marks the tapped unit as playing`() = runTest {
+        val player = RecordingPlayer()
+        val vm = readerViewModel(player, mode = ReadingMode.Tap)
+        pipeline.emit(PipelineState.Ready(preparedUnits(3), image = null))
+        advanceUntilIdle()
+
+        vm.onLineTapped(1)
+        advanceUntilIdle()
+
+        assertEquals(listOf(1), player.played.map { it.single().unit.index })
+        assertEquals(1, player.endOfPageCalls)
+        assertEquals(1, (vm.uiState.value as ReaderUiState.Playing).playingIndex)
+    }
+
+    @Test fun `tapping a line whose audio is not ready is inert`() = runTest {
+        val player = RecordingPlayer()
+        val vm = readerViewModel(player, mode = ReadingMode.Tap)
+        pipeline.emit(PipelineState.Preparing(speechUnits(3), preparedUnits(1), image = null))
+        advanceUntilIdle()
+
+        vm.onLineTapped(2) // audio not ready for unit 2
+        advanceUntilIdle()
+
+        assertTrue(player.played.isEmpty())
+        assertEquals(
+            "a rejected tap must not highlight the bubble either",
+            null,
+            (vm.uiState.value as ReaderUiState.Playing).playingIndex,
+        )
+    }
+
+    @Test fun `preparing shows every line with only ready ones marked so`() = runTest {
+        val vm = readerViewModel(RecordingPlayer(), mode = ReadingMode.Tap)
+        pipeline.emit(PipelineState.Preparing(speechUnits(3), preparedUnits(1), image = null))
+        advanceUntilIdle()
+
+        val lines = (vm.uiState.value as ReaderUiState.Playing).lines
+        assertEquals(3, lines.size)
+        assertEquals(listOf(true, false, false), lines.map { it.audioReady })
+    }
+
+    /**
+     * F7: a line not yet synthesized must be marked not-ready in Auto too, not
+     * just Tap. This only pins the `audioReady` flag ReaderViewModel produces -
+     * whether the reader actually RENDERS a not-ready line any differently
+     * (I2's dimming) is a rendering concern with no ViewModel involved at all,
+     * and belongs to (and is asserted by) ReaderScreenTest instead. This test's
+     * old name claimed the rendering too, which nothing here checked.
+     */
+    @Test fun `an auto-mode line whose audio is not ready is marked not ready`() = runTest {
+        val vm = readerViewModel(RecordingPlayer(), mode = ReadingMode.Auto)
+        pipeline.emit(PipelineState.Preparing(speechUnits(3), preparedUnits(1), image = null))
+        advanceUntilIdle()
+
+        val lines = (vm.uiState.value as ReaderUiState.Playing).lines
+        assertEquals(listOf(true, false, false), lines.map { it.audioReady })
+    }
+
+    /**
+     * Pins the start-up ordering ruling: settings.mode is a Room-backed Flow whose
+     * first emission is asynchronous, so a naive `init` that collects pipeline.state
+     * and settings.mode as two independent launches can process a pipeline state
+     * before the real mode has ever been read, autoplaying a page the user set to
+     * Tap. Resolving the first mode value BEFORE handling any pipeline state (see
+     * ReaderViewModel's init) is what this test pins: the pipeline is already
+     * sitting in Ready - as it would be for a StateFlow a late collector joins -
+     * when the ViewModel is constructed with mode fixed to Tap, and no autoplay may
+     * ever happen.
+     */
+    /**
+     * F1: the sibling `launch { settings.mode.collect { mode = it } }` used to
+     * have no `.catch`, unlike the `.first()` call right above it in init. Both
+     * launches are non-supervisor children of the same coroutine that also runs
+     * `pipeline.state.collect` directly (not in its own launch) - so an uncaught
+     * throw from the sibling collector cancels that whole coroutine, silently
+     * killing pipeline-state handling for the rest of the page's life. A settings
+     * fault must never cost the page that is already on screen.
+     */
+    @Test fun `a settings mode fault after the first emission does not stop later pipeline states from being handled`() =
+        runTest {
+            val pipeline = FakePipeline()
+            val player = FakePlayer()
+            val vm = ReaderViewModel(pipeline, player, ThrowsAfterFirstEmissionSettingsRepository())
+            advanceUntilIdle() // let mode resolve via first(), then let the sibling collector fault
+
+            pipeline.states.value = PipelineState.Ready(listOf(prepared(0)), image = null)
+            advanceUntilIdle()
+
+            assertTrue(
+                "pipeline states must still be handled after a later settings.mode fault",
+                vm.uiState.value is ReaderUiState.Playing,
+            )
+        }
+
+    @Test fun `mode resolves before an already-ready pipeline state is handled`() = runTest {
+        pipeline.emit(PipelineState.Ready(preparedUnits(2), image = null))
+        val player = RecordingPlayer()
+        ReaderViewModel(pipeline, player, FakeSettingsRepository(ReadingMode.Tap))
+        advanceUntilIdle()
+
+        assertTrue(
+            "the first mode value must be resolved before any pipeline state is handled",
+            player.played.isEmpty(),
+        )
+    }
+
+    // --- One unit at a time (Task 7) ------------------------------------------
+
+    @Test fun `starts on the first unit`() = runTest {
+        val vm = readerViewModel(RecordingPlayer(), mode = ReadingMode.Tap)
+        val image = pageImage()
+        // Distinct, non-null bounds per unit - the fixtures elsewhere in this
+        // file default bounds to null, which would let `image`/`bounds` silently
+        // be replaced with null everywhere and still pass (I3).
+        val units = List(3) { i ->
+            PreparedUnit(
+                unit = SpeechUnit(i, "Wolf", "line $i", BoundingBox(i * 0.1f, 0f, i * 0.1f + 0.1f, 0.1f)),
+                voiceId = "v",
+                audio = File("/tmp/$i.mp3"),
+            )
+        }
+        pipeline.emit(PipelineState.Ready(units, image))
+        advanceUntilIdle()
+
+        val state = vm.uiState.value as ReaderUiState.Playing
+        assertEquals(0, state.current)
+        assertEquals("the page image must reach the reader's state", image, state.image)
+        assertEquals(
+            "each line's bounds must come from its own unit",
+            units.map { it.unit.bounds },
+            state.lines.map { it.bounds },
+        )
+    }
+
+    @Test fun `auto advances to the unit the player moved to`() = runTest {
+        val player = RecordingPlayer()
+        val vm = readerViewModel(player, mode = ReadingMode.Auto)
+        pipeline.emit(PipelineState.Ready(preparedUnits(3), image = null))
+        advanceUntilIdle()
+
+        player.state.value = PlaybackState.Playing(2)
+        advanceUntilIdle()
+
+        assertEquals(2, current(vm))
+    }
+
+    /**
+     * I2: `playingIndex` alone does not catch a bug that lifts
+     * `current = state.playlistIndex` out of the `mode == Auto` guard - Tap's
+     * one-item playlist always reports position 0, and if the tapped unit also
+     * happened to be unit 0, a leaked read would coincidentally match the
+     * correct value. Tapping line 2 first - away from the tapped playlist's
+     * reported position of 0 - makes a leaked read distinguishable: the buggy
+     * value would be 0, not 2.
+     */
+    @Test fun `tap does not let the player's playlist position overwrite current`() = runTest {
+        val player = RecordingPlayer()
+        val vm = readerViewModel(player, mode = ReadingMode.Tap)
+        pipeline.emit(PipelineState.Ready(preparedUnits(3), image = null))
+        advanceUntilIdle()
+
+        vm.onLineTapped(2)
+        advanceUntilIdle()
+
+        player.state.value = PlaybackState.Playing(0)
+        advanceUntilIdle()
+
+        assertEquals(
+            "Tap must not take current from the player's position",
+            2,
+            current(vm),
+        )
+    }
+
+    /**
+     * I4: `current`/`playingIndex` used to be written from `state.playlistIndex`
+     * unconditionally, before checking whether there was a live Playing ui
+     * state to write into. A late report from the OUTGOING page's player,
+     * arriving after the Idle/Reading reset already zeroed `current` for the
+     * next page, would still silently move `current` - and the next page's
+     * playingState() clamp would then just accept that stale value instead of
+     * resetting it, opening the reader on the wrong bubble. Pins that a late
+     * report landing while the ui state is ReadingPage (not Playing) is
+     * dropped, not stashed for the next page to inherit.
+     */
+    @Test fun `a late auto playlist report during a page reset does not leak into the next page`() = runTest {
+        val player = RecordingPlayer()
+        val vm = readerViewModel(player, mode = ReadingMode.Auto)
+        pipeline.emit(PipelineState.Ready(preparedUnits(3), image = null))
+        advanceUntilIdle()
+
+        player.state.value = PlaybackState.Playing(2)
+        advanceUntilIdle()
+        assertEquals(2, current(vm))
+
+        // The next page starts: Idle/Reading resets `current` to 0 while there
+        // is no Playing ui state (screen shows ReadingPage).
+        pipeline.emit(PipelineState.Reading)
+        advanceUntilIdle()
+
+        // A late report from the OLD page's player arrives after the reset,
+        // while the ui state is still ReadingPage, not Playing.
+        player.state.value = PlaybackState.Playing(1)
+        advanceUntilIdle()
+
+        // The next page has enough units that a leaked `current = 1` would
+        // survive playingState()'s clamp rather than being coincidentally
+        // clamped back to a value that looks correct.
+        pipeline.emit(PipelineState.Ready(preparedUnits(3), image = null))
+        advanceUntilIdle()
+
+        assertEquals(
+            "a late report from the outgoing page must not leak into the next page's current",
+            0,
+            current(vm),
+        )
+    }
+
+    private fun current(vm: ReaderViewModel) = (vm.uiState.value as ReaderUiState.Playing).current
+
+    // --- Panel groups in the reader state (Task 2) -----------------------------
+
+    @Test fun `the reader state groups lines by their panel`() = runTest {
+        // Two units in one panel, a third in another: two groups, and the flat
+        // line list still holds all three in order.
+        val panelA = BoundingBox(0f, 0f, 1f, 0.5f)
+        val panelB = BoundingBox(0f, 0.5f, 1f, 1f)
+        val units = listOf(
+            speechUnit(0).copy(panel = panelA),
+            speechUnit(1).copy(panel = panelA),
+            speechUnit(2).copy(panel = panelB),
+        )
+
+        val state = playingStateFor(units)
+
+        assertEquals(2, state.panels.size)
+        assertEquals(listOf(0, 1), state.panels[0].lines.map { it.index })
+        assertEquals(listOf(0, 1, 2), state.lines.map { it.index })
+    }
+
+    // --- Tap-a-line, and a safe Auto jump (Task 3) -----------------------------
+
+    /**
+     * Set by [readerInTapMode]/[readerInAutoMode] so a test body can inspect the
+     * player's recorded calls directly, the way [pipeline] is shared above.
+     */
+    private lateinit var player: FakePlayer
+
+    /**
+     * Drives the shared [pipeline] to a page of [unitCount] units, [readyCount] of
+     * them already synthesized, on a fresh [FakePlayer] stored in [player]. Any
+     * play()/append() calls this setup itself triggers - Auto mode queues its
+     * ready units immediately, Tap mode never does - are cleared before this
+     * returns: what a test's own setup does is not what any of these tests are
+     * about, only what happens after [ReaderViewModel.onLineTapped] is called.
+     */
+    private suspend fun TestScope.readerWithMode(
+        mode: ReadingMode,
+        unitCount: Int,
+        readyCount: Int,
+    ): ReaderViewModel {
+        player = FakePlayer()
+        val vm = readerViewModel(player, mode = mode)
+        pipeline.emit(
+            if (readyCount >= unitCount) {
+                PipelineState.Ready(preparedUnits(unitCount), image = null)
+            } else {
+                PipelineState.Preparing(speechUnits(unitCount), preparedUnits(readyCount), image = null)
+            },
+        )
+        advanceUntilIdle()
+        player.played.clear()
+        player.appended.clear()
+        return vm
+    }
+
+    private suspend fun TestScope.readerInTapMode(unitCount: Int, readyCount: Int = unitCount): ReaderViewModel =
+        readerWithMode(ReadingMode.Tap, unitCount, readyCount)
+
+    private suspend fun TestScope.readerInAutoMode(unitCount: Int, readyCount: Int = unitCount): ReaderViewModel =
+        readerWithMode(ReadingMode.Auto, unitCount, readyCount)
+
+    /** Advances the shared [pipeline] to Ready with [readyCount] synthesized units, as if synthesis just finished. */
+    private suspend fun TestScope.becomeReady(vm: ReaderViewModel, readyCount: Int) {
+        pipeline.emit(PipelineState.Ready(preparedUnits(readyCount), image = null))
+        advanceUntilIdle()
+    }
+
+    @Test fun `a tap in Tap mode plays just that line`() = runTest {
+        val vm = readerInTapMode(unitCount = 3)
+
+        vm.onLineTapped(2)
+
+        assertEquals(listOf(2), player.played)
+        assertEquals(2, (vm.uiState.value as ReaderUiState.Playing).playingIndex)
+    }
+
+    @Test fun `a tap in Auto mode plays from that line onward`() = runTest {
+        val vm = readerInAutoMode(unitCount = 4)
+
+        vm.onLineTapped(2)
+
+        assertEquals(listOf(2, 3), player.played)
+    }
+
+    @Test fun `a tap on a line whose audio is not ready does nothing`() = runTest {
+        val vm = readerInTapMode(unitCount = 3, readyCount = 1)
+        player.played.clear()
+
+        vm.onLineTapped(2)
+
+        assertEquals(emptyList<Int>(), player.played)
+    }
+
+    /**
+     * `bounded` is inherited unchanged from the deleted `moveTo`: there is no
+     * wrap-around, and no unit off the page. Every other new test here passes an
+     * in-range index, so this is the only coverage of the coerceIn call itself -
+     * both a negative index and one past the last line must land on a real line.
+     */
+    @Test fun `a tap on an out-of-range index is clamped to the nearest valid line`() = runTest {
+        val vm = readerInTapMode(unitCount = 3)
+
+        vm.onLineTapped(-5)
+        assertEquals(listOf(0), player.played)
+        assertEquals(0, (vm.uiState.value as ReaderUiState.Playing).playingIndex)
+
+        player.played.clear()
+        vm.onLineTapped(99)
+        assertEquals(listOf(2), player.played)
+        assertEquals(2, (vm.uiState.value as ReaderUiState.Playing).playingIndex)
+    }
+
+    /**
+     * The first invariant from spec section 6.1. A jump replaces the playlist, so
+     * `queued` — which counts units already handed to the player — describes a
+     * playlist that no longer exists. Left unreset, the next unit to finish
+     * synthesising is appended against a stale count and an earlier unit is never
+     * heard at all.
+     *
+     * A continuously-Auto session cannot discriminate this: queue() keeps `queued`
+     * in lockstep with `lastReady` throughout, so `queued == lastReady.size` would
+     * already hold before any tap even if onLineTapped's own reset were deleted
+     * outright. The setup below breaks that coincidence on purpose: the page is
+     * prepared while the mode is still Tap, so queue() is gated off and `queued`
+     * stays at 0 while `lastReady` advances to 5 - only onLineTapped's own
+     * `queued = lastReady.size` can make the post-jump append land on unit 5
+     * rather than replaying units 0-4.
+     */
+    @Test fun `a unit synthesised after an Auto jump is still heard, in order`() = runTest {
+        val settings = FakeSettingsRepository(ReadingMode.Tap)
+        player = FakePlayer()
+        val vm = ReaderViewModel(pipeline, player, settings)
+        pipeline.emit(PipelineState.Preparing(speechUnits(6), preparedUnits(5), image = null))
+        advanceUntilIdle()
+        settings.setMode(ReadingMode.Auto)
+        advanceUntilIdle()
+
+        vm.onLineTapped(3)
+        player.played.clear()
+        player.appended.clear()
+        becomeReady(vm, readyCount = 6)
+
+        // Unit 5 was ready but behind the jump; unit 6 is new. Neither may be lost.
+        assertEquals(listOf(5), player.appended)
+    }
+
+    /**
+     * The second invariant from spec section 6.1. After a jump the playlist starts
+     * at the tapped unit, so the player's position 0 IS that unit. Copying the
+     * position would mark line 0 as sounding and scroll the list to the wrong card.
+     */
+    @Test fun `playingIndex reports the unit index, not the playlist position`() = runTest {
+        val vm = readerInAutoMode(unitCount = 4)
+
+        vm.onLineTapped(2)
+        player.state.value = PlaybackState.Playing(playlistIndex = 0)
+        advanceUntilIdle()
+
+        assertEquals(2, (vm.uiState.value as ReaderUiState.Playing).playingIndex)
+    }
+
+    // --- endOfPage only when nothing more is coming (fix-wave finding 1) ------
+
+    /**
+     * PagePlayerImpl.pageComplete is a STICKY flag cleared only by play()/stop().
+     * Calling endOfPage() on an Auto tap that jumps ahead of a still-synthesising
+     * page would arm Finished for every later playlist starvation, not just this
+     * one - flashing "The End." and dropping the sounding marker for the rest of
+     * the page. Six units, four ready: the tapped playlist [1, 2, 3] does not
+     * reach unit 5, so endOfPage() must not fire yet.
+     */
+    @Test fun `an Auto tap on a partially synthesised page does not call endOfPage`() = runTest {
+        val vm = readerInAutoMode(unitCount = 6, readyCount = 4)
+        val before = player.endOfPageCalls
+
+        vm.onLineTapped(1)
+
+        assertEquals(
+            "a jump that does not reach the last ready unit must not arm Finished",
+            before,
+            player.endOfPageCalls,
+        )
+    }
+
+    /**
+     * The other direction of the same fix: a tap on a page whose every unit is
+     * already synthesized IS genuinely the end of what will ever be queued, so
+     * endOfPage() must still fire - this is what makes the mechanism
+     * self-completing rather than simply removed.
+     */
+    @Test fun `an Auto tap on a fully synthesised page calls endOfPage`() = runTest {
+        val vm = readerInAutoMode(unitCount = 4)
+        val before = player.endOfPageCalls
+
+        vm.onLineTapped(1)
+
+        assertEquals(
+            "a jump that reaches every ready unit is genuinely the end of the page",
+            before + 1,
+            player.endOfPageCalls,
+        )
     }
 }

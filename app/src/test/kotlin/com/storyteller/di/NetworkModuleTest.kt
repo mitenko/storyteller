@@ -133,4 +133,29 @@ class NetworkModuleTest {
         const val ANTHROPIC_SENTINEL = "sentinel-anthropic-key"
         const val ELEVENLABS_SENTINEL = "sentinel-elevenlabs-key"
     }
+
+    /**
+     * A measured page read takes 8.5-8.9 seconds; OkHttp's default read timeout is
+     * 10. Two real scans failed with SocketTimeoutException before these were set
+     * (bundles page-1788307481703 and page-1788307531942), and the failure mode is
+     * nasty: the page is lost, the child sees an error, and nothing in the app says
+     * the deadline was the cause. Pinned so nobody restores the defaults by
+     * simplifying the builder.
+     */
+    @Test fun `both clients allow far longer than a measured page read`() {
+        for ((name, client) in listOf(
+            "anthropic" to NetworkModule.anthropicClient("k"),
+            "elevenlabs" to NetworkModule.elevenLabsClient("k"),
+        )) {
+            assertTrue(
+                "$name read timeout is ${client.readTimeoutMillis}ms, which leaves no " +
+                    "headroom over a measured 8.9s call",
+                client.readTimeoutMillis >= 60_000,
+            )
+            assertTrue("$name write timeout too short for a base64 image upload",
+                client.writeTimeoutMillis >= 30_000)
+            assertTrue("$name needs an overall ceiling so a wedged call cannot hang",
+                client.callTimeoutMillis > 0)
+        }
+    }
 }

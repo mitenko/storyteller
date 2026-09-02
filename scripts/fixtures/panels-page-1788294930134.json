@@ -1,0 +1,43 @@
+{
+  "bundle": "page-1788294930134",
+  "uploadWidth": 840,
+  "uploadHeight": 1411,
+  "labelledBy": "hand, read off a 100px coordinate grid rendered over page-upload.jpg",
+  "labelledOn": "2026-09-02",
+  "caveat": [
+    "The page is a photograph of a curved book page, so the gutters are slightly",
+    "slanted and no axis-aligned rectangle is exact. Edges are read at the middle",
+    "of each gutter band. Both these labels and the model's output are axis-aligned",
+    "approximations of the same slanted truth, so a perfect IoU is not achievable",
+    "and around 0.9 is the practical ceiling.",
+    "Chosen because OCR read ZERO words on this page: no automated method can",
+    "produce ground truth here, which is exactly why it needs hand labels."
+  ],
+  "panels": [
+    {
+      "x1": 0, "y1": 0, "x2": 840, "y2": 305,
+      "note": "top tier, full width. Rabbit cheering, robot overhead. Balloon: HE DID IT!!!",
+      "expectedUnits": [0]
+    },
+    {
+      "x1": 0, "y1": 325, "x2": 840, "y2": 620,
+      "note": "second tier, full width. Rabbit's ears left, airship right. Balloons: COGSLEY!, PAF!, PAF!",
+      "expectedUnits": [1, 2, 3]
+    },
+    {
+      "x1": 0, "y1": 640, "x2": 420, "y2": 1000,
+      "note": "third tier, LEFT half. Rabbit swinging on a rope. Balloons: FOOMP!, OOF!",
+      "expectedUnits": [4, 5]
+    },
+    {
+      "x1": 432, "y1": 640, "x2": 840, "y2": 1000,
+      "note": "third tier, RIGHT half. Cogsley the robot knocked back. Balloons: GAH!, FOOMP!!",
+      "expectedUnits": [6, 7]
+    },
+    {
+      "x1": 0, "y1": 1012, "x2": 840, "y2": 1411,
+      "note": "bottom tier, full width. Rabbit and Cogsley side by side. Balloons: SPOILED YOUR LUNCH BARBARIANS!, I DON'T THINK THEY WERE AFTER THE WYVERN",
+      "expectedUnits": [8, 9]
+    }
+  ]
+}

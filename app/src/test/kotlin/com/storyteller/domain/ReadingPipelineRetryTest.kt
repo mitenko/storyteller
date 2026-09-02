@@ -6,6 +6,7 @@ import com.storyteller.domain.model.PipelineState
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -78,6 +79,40 @@ class ReadingPipelineRetryTest {
             p.start(pageImage())
             skipItems(2) // Reading, Preparing(empty)
             assertEquals(FailureReason.Synthesis, (awaitItem() as PipelineState.Failed).reason)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    /**
+     * Regression guard for the cached-parse branch's own `Preparing` emission
+     * (`ReadingPipelineImpl.kt:80`), distinct from the no-cache branch that
+     * delegates to `run()`. A regression to the `image = null` default here
+     * would fall back to rendering text, not a bubble — nothing would look
+     * broken, and no other test would catch it.
+     */
+    @Test
+    fun `retry's cached-parse path carries the original page image`() = runTest {
+        val units = (0..2).map { speechUnit(it) }
+        val reader = FakePageReader(Result.success(units))
+        // Every unit shares the default "Wolf" speaker, so voice lookup fails
+        // for all of them — but only after the page has already been parsed
+        // and cached, so retry() takes the cached-parse branch, not a fresh read.
+        val voices = FakeVoiceRepository(fail = setOf("Wolf"))
+        val p = ReadingPipelineImpl(reader, voices, FakeAudioRepository(), this)
+        val image = pageImage()
+
+        p.state.test {
+            skipItems(1)
+            p.start(image)
+            while (awaitItem() !is PipelineState.Failed) { /* drain to failure */ }
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        p.state.test {
+            skipItems(1) // the Failed state left over from the first pass
+            p.retry()
+            val preparing = awaitItem() as PipelineState.Preparing
+            assertSame(image, preparing.image)
             cancelAndIgnoreRemainingEvents()
         }
     }

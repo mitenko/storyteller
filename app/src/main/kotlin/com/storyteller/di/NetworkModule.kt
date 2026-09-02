@@ -13,11 +13,38 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
+import java.time.Duration
 import javax.inject.Qualifier
 import javax.inject.Singleton
 
 @Qualifier @Retention(AnnotationRetention.BINARY) annotation class AnthropicRetrofit
 @Qualifier @Retention(AnnotationRetention.BINARY) annotation class ElevenLabsRetrofit
+
+/**
+ * OkHttp defaults every timeout to 10 seconds, which is not enough for either of
+ * these APIs and produced silent failures on device.
+ *
+ * A measured page read takes **8.5 to 8.9 seconds** on a fast desktop connection
+ * (Sonnet 5, ~2900 input tokens, ~950 output tokens for a ten-unit page). That is
+ * 85-89% of the default budget spent before a phone's slower link, a denser page,
+ * or ordinary network jitter is accounted for -- and two real scans duly failed
+ * with SocketTimeoutException, recorded in bundles page-1788307481703 and
+ * page-1788307531942.
+ *
+ * The read timeout is therefore set an order of magnitude above the measured time
+ * rather than a little above it. A page that takes fifteen seconds is a slow page;
+ * a page that fails at ten is a broken app, and the two are not close in cost to a
+ * child waiting for a story.
+ *
+ * Write matters separately: the request carries a base64 image of a few hundred
+ * kilobytes, and a slow uplink is the common case on mobile, not the exceptional
+ * one. The overall call timeout is the backstop that stops a wedged connection
+ * hanging a read forever.
+ */
+private val CONNECT_TIMEOUT: Duration = Duration.ofSeconds(20)
+private val READ_TIMEOUT: Duration = Duration.ofSeconds(90)
+private val WRITE_TIMEOUT: Duration = Duration.ofSeconds(60)
+private val CALL_TIMEOUT: Duration = Duration.ofSeconds(150)
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -47,6 +74,10 @@ object NetworkModule {
      * passes BuildConfig, from the @Provides methods below.
      */
     internal fun anthropicClient(apiKey: String): OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(CONNECT_TIMEOUT)
+        .readTimeout(READ_TIMEOUT)
+        .writeTimeout(WRITE_TIMEOUT)
+        .callTimeout(CALL_TIMEOUT)
         .addInterceptor { chain ->
             chain.proceed(
                 chain.request().newBuilder()
@@ -57,7 +88,13 @@ object NetworkModule {
         }
         .build()
 
+    // Same defaults, same problem: speech synthesis is not a sub-ten-second
+    // operation either, and a timeout here loses a line's audio rather than a page.
     internal fun elevenLabsClient(apiKey: String): OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(CONNECT_TIMEOUT)
+        .readTimeout(READ_TIMEOUT)
+        .writeTimeout(WRITE_TIMEOUT)
+        .callTimeout(CALL_TIMEOUT)
         .addInterceptor { chain ->
             chain.proceed(
                 chain.request().newBuilder()

@@ -4,14 +4,20 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.storyteller.domain.ReadingPipeline
 import com.storyteller.domain.model.FailureReason
+import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.PipelineState
 import com.storyteller.domain.model.PlaybackState
 import com.storyteller.domain.model.PreparedUnit
+import com.storyteller.domain.model.ReadingMode
+import com.storyteller.domain.model.SpeechUnit
 import com.storyteller.domain.repository.PagePlayer
+import com.storyteller.domain.repository.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -19,6 +25,7 @@ import javax.inject.Inject
 class ReaderViewModel @Inject constructor(
     private val pipeline: ReadingPipeline,
     private val player: PagePlayer,
+    private val settings: SettingsRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<ReaderUiState>(ReaderUiState.ReadingPage)
@@ -32,23 +39,101 @@ class ReaderViewModel @Inject constructor(
     private var queued = 0
 
     /**
+     * The unit indices currently in the player's playlist, in playlist order.
+     *
+     * Replaces the assumption that playlist position N is unit N. That held while
+     * every playlist was the whole page from unit 0; an Auto-mode tap jumps to a
+     * line, so position 0 becomes the tapped unit and copying the position would
+     * mark the wrong line as sounding.
+     *
+     * A list rather than a start-offset integer: no harder to keep, correct for a
+     * playlist that is not a contiguous run, and getOrNull turns a stale position
+     * into a null marker rather than an exception.
+     */
+    private var playlistUnits: List<Int> = emptyList()
+
+    /**
      * Last observed player state. Mirrored into ReaderUiState.Playing so the reader
      * has an ending: nothing outside PagePlayerImpl observed PlaybackState before,
      * so the whole endOfPage()/pageComplete mechanism reported to no one.
      */
     private var playback: PlaybackState = PlaybackState.Idle
 
+    /** Auto reads the page through; Tap plays nothing until a line is tapped. */
+    private var mode = ReadingMode.Tap
+
+    /** The row currently sounding in Tap mode, or null. Cleared on a fresh page and on Finished. */
+    private var playingIndex: Int? = null
+
+    /** Whatever units are synthesized so far for the current page; what onLineTapped may play. */
+    private var lastReady: List<PreparedUnit> = emptyList()
+
+    /** Which unit is on screen. Bounded at both ends in [playingState] and [onLineTapped]; reset alongside [queued]. */
+    private var current = 0
+
     init {
         viewModelScope.launch {
+            // settings.mode is a Room-backed Flow whose first emission is
+            // asynchronous. Resolving it BEFORE handling any pipeline state (rather
+            // than collecting both in parallel, or via combine()) is what stops a
+            // pipeline state that is already sitting in Ready - a StateFlow, so a
+            // late collector sees it immediately - from being processed while
+            // `mode` still holds its Auto default: that would autoplay a page the
+            // user had set to Tap, intermittently and only depending on which
+            // collector happened to run first. combine() was rejected too: it
+            // would re-run state handling on every mode change and risk a re-queue
+            // or replay when the user flips the toggle mid-story.
+            //
+            // catch{} guards this specific first() call: without it, a faulting
+            // settings.mode would kill this whole coroutine before pipeline.state
+            // is ever collected, leaving the reader stuck on ReadingPage with no
+            // error screen - a settings fault must never stop a page being read.
+            mode = settings.mode.catch { emit(ReadingMode.Tap) }.first()
+            // Guarded the same way as the .first() above: this launch is a
+            // non-supervisor child of the coroutine that runs
+            // pipeline.state.collect directly (not in its own launch), so an
+            // uncaught throw here would cancel that coroutine too - silently
+            // killing pipeline-state handling for the rest of the page's life,
+            // long after start-up. A settings fault must never cost the page.
+            launch { settings.mode.catch { }.collect { mode = it } }
             pipeline.state.collect { state -> onPipelineState(state) }
         }
         viewModelScope.launch {
             player.state.collect { state ->
                 playback = state
-                // Only Playing carries it; the other branches are pipeline-driven
-                // and would be overwritten by the next pipeline emission anyway.
+                if (state == PlaybackState.Finished) playingIndex = null
+
+                // Only Playing carries playback/current/playingIndex; the other
+                // branches are pipeline-driven and would be overwritten by the
+                // next pipeline emission anyway. Both field assignments below
+                // live INSIDE this check (not above it, unconditionally) so that
+                // a player event for a page that has already been reset - e.g. a
+                // late Playing(N) from the outgoing page landing after the
+                // Idle/Reading reset zeroed `current` for the next one - cannot
+                // silently move `current`/`playingIndex` with no UI to reflect
+                // it: playingState()'s clamp would then just accept that stale
+                // value for the new page instead of resetting it, opening the
+                // reader on the wrong bubble.
                 (_uiState.value as? ReaderUiState.Playing)?.let {
-                    _uiState.value = it.copy(playback = state)
+                    // Auto is the ONLY mode that may trust the player's position -
+                    // Tap plays a one-item playlist and always reports position 0,
+                    // so taking it here would move the highlight to line 0 on every
+                    // tap; onLineTapped already recorded the real index and must
+                    // win.
+                    //
+                    // Mapped, not copied: an Auto-mode tap (onLineTapped) REPLACES
+                    // the playlist starting at the tapped unit, so position 0 is
+                    // not unit 0 once a jump has happened. playlistUnits carries
+                    // the playlist's actual unit indices in order, and getOrNull
+                    // turns a stale/out-of-range position into a no-op rather than
+                    // an exception.
+                    if (mode == ReadingMode.Auto && state is PlaybackState.Playing) {
+                        playlistUnits.getOrNull(state.playlistIndex)?.let { unitIndex ->
+                            playingIndex = unitIndex
+                            current = unitIndex
+                        }
+                    }
+                    _uiState.value = it.copy(playback = state, playingIndex = playingIndex, current = current)
                 }
             }
         }
@@ -67,12 +152,17 @@ class ReaderViewModel @Inject constructor(
                 // guard already drops Preparing/Ready from a superseded run, so a
                 // stale-epoch state cannot arrive after this reset and be misread.
                 queued = 0
+                lastReady = emptyList()
+                playingIndex = null
+                playlistUnits = emptyList()
+                current = 0
                 _uiState.value = ReaderUiState.ReadingPage
             }
 
             is PipelineState.Preparing -> {
-                queue(state.ready)
-                _uiState.value = ReaderUiState.PreparingVoices(state.ready.size, state.total)
+                if (mode == ReadingMode.Auto) queue(state.ready)
+                lastReady = state.ready
+                _uiState.value = playingState(state.units, state.ready, state.image)
             }
 
             is PipelineState.Ready -> {
@@ -83,13 +173,15 @@ class ReaderViewModel @Inject constructor(
                 // first state this collector ever observes. Either way, queue()
                 // must pick up whatever is still unqueued, and endOfPage() must be
                 // called every time so PagePlayerImpl can trust a starved playlist
-                // as Finished rather than merely under-supplied.
-                queue(state.units)
-                player.endOfPage()
-                _uiState.value = ReaderUiState.Playing(
-                    state.units.map { ReaderUiState.Line(it.unit.speaker, it.unit.text) },
-                    playback,
-                )
+                // as Finished rather than merely under-supplied. Tap mode never
+                // queues or calls endOfPage() on its own — a tap is the only thing
+                // that plays anything in that mode.
+                if (mode == ReadingMode.Auto) {
+                    queue(state.units)
+                    player.endOfPage()
+                }
+                lastReady = state.units
+                _uiState.value = playingState(state.units.map { it.unit }, state.units, state.image)
             }
 
             is PipelineState.Failed -> {
@@ -102,9 +194,17 @@ class ReaderViewModel @Inject constructor(
                 // clearing here, a retry that re-queues unit 0 would call play()
                 // again, which does reset the playlist - but stopping now is the
                 // honest signal the moment the page is known broken, not just an
-                // accident of what play() happens to do later.
+                // accident of what play() happens to do later. lastReady and
+                // playingIndex are cleared alongside queued for the same reason:
+                // defence-in-depth so a stray tap can never start audio underneath
+                // the error screen, even though the Error uiState itself offers no
+                // tappable rows.
                 player.stop()
                 queued = 0
+                lastReady = emptyList()
+                playingIndex = null
+                playlistUnits = emptyList()
+                current = 0
                 _uiState.value = ReaderUiState.Error(state.reason.message(), state.retryable)
             }
         }
@@ -124,14 +224,97 @@ class ReaderViewModel @Inject constructor(
         if (queued == 0) {
             player.play(listOf(fresh.first()))
             fresh.drop(1).forEach(player::append)
+            playlistUnits = fresh.map { it.unit.index }
         } else {
             fresh.forEach(player::append)
+            playlistUnits = playlistUnits + fresh.map { it.unit.index }
         }
         queued = ready.size
     }
 
+    /**
+     * Every unit renders; only the synthesized ones are marked ready. [current]
+     * is clamped here, as well as in [onLineTapped], because a page's unit count
+     * is only ever known once this state is built - a shorter page than the one
+     * on screen must not leave a stale index pointing past its last line.
+     */
+    private fun playingState(
+        all: List<SpeechUnit>,
+        ready: List<PreparedUnit>,
+        image: PageImage?,
+    ): ReaderUiState.Playing {
+        current = current.coerceIn(0, (all.size - 1).coerceAtLeast(0))
+        val readyIndices = ready.mapTo(mutableSetOf()) { it.unit.index }
+        return ReaderUiState.Playing(
+            panels = all.map { u ->
+                ReaderUiState.Line(
+                    index = u.index,
+                    speaker = u.speaker,
+                    text = u.text,
+                    bounds = u.bounds,
+                    panel = u.panel,
+                    // Greying tracks readiness alone, in both modes - Auto used to
+                    // report every bubble ready regardless of synthesis progress,
+                    // which lost Auto's only progress indication (F7).
+                    audioReady = u.index in readyIndices,
+                )
+            }.groupByPanel(),
+            current = current,
+            image = image,
+            playback = playback,
+            mode = mode,
+            playingIndex = playingIndex,
+        )
+    }
+
+    /**
+     * Plays the tapped line. The only navigation the reader has, now that the
+     * arrows are gone: the list itself is how a child moves around the page.
+     *
+     * Tap mode plays that one line, as before. Auto mode JUMPS - it plays from the
+     * tapped line to the end of what is ready - so a child pointing at a picture
+     * continues the story from there rather than restarting a single line.
+     *
+     * A line whose audio is not synthesized yet is a no-op. Those rows are already
+     * greyed by `audioReady`, so the affordance and the behaviour agree.
+     */
+    fun onLineTapped(index: Int) {
+        val state = _uiState.value as? ReaderUiState.Playing ?: return
+        val bounded = index.coerceIn(0, (state.lines.size - 1).coerceAtLeast(0))
+        if (lastReady.none { it.unit.index == bounded }) return
+
+        current = bounded
+        playingIndex = bounded
+
+        val playlist = when (mode) {
+            ReadingMode.Tap -> lastReady.filter { it.unit.index == bounded }
+            ReadingMode.Auto -> lastReady.filter { it.unit.index >= bounded }
+        }
+        player.play(playlist)
+        // endOfPage() only when nothing more is coming for this page.
+        // PagePlayerImpl.pageComplete is a STICKY flag cleared only by play()/
+        // stop(), so calling this on an Auto tap that jumps ahead of a
+        // still-synthesising page would arm Finished for every later playlist
+        // starvation, not just this one - "The End." would flash and the
+        // sounding marker would drop, then recover only once the next append
+        // resumes playback. This is self-completing: once PipelineState.Ready
+        // arrives, the Auto branch there calls endOfPage() anyway.
+        if (mode == ReadingMode.Tap || lastReady.size == state.lines.size) player.endOfPage()
+        playlistUnits = playlist.map { it.unit.index }
+        // The playlist was REPLACED, so every ready unit is now either in it or
+        // deliberately behind it. Without this, queue() diffs the next cumulative
+        // `ready` against a stale count and silently drops a unit. Scoped to
+        // Auto: queue() is gated on `mode == Auto`, so in Tap mode this value is
+        // never read - a Tap tap never calls queue().
+        if (mode == ReadingMode.Auto) queued = lastReady.size
+
+        _uiState.value = state.copy(current = bounded, playingIndex = bounded)
+    }
+
     fun onRetry() {
         queued = 0
+        playlistUnits = emptyList()
+        current = 0
         pipeline.retry()
     }
 
@@ -166,4 +349,6 @@ private fun FailureReason.message(): String = when (this) {
         "Something came back garbled. Try that page again."
     FailureReason.Synthesis ->
         "Couldn't make the voices for this page. Try again."
+    FailureReason.Unknown ->
+        "Something went wrong reading this page. Try again."
 }

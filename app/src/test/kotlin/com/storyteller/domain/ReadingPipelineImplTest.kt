@@ -4,6 +4,7 @@ import app.cash.turbine.test
 import com.storyteller.domain.model.PipelineState
 import com.storyteller.domain.model.FailureReason
 import com.storyteller.domain.model.PageImage
+import com.storyteller.domain.model.ParsedPage
 import com.storyteller.domain.model.SpeechUnit
 import com.storyteller.domain.repository.AudioRepository
 import com.storyteller.domain.repository.PageReader
@@ -23,6 +24,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -30,12 +32,30 @@ import java.io.File
 @OptIn(ExperimentalCoroutinesApi::class)
 class ReadingPipelineImplTest {
 
+    /** Populated by [pipelineWith] for tests that assert on the whole state history. */
+    private val states = mutableListOf<PipelineState>()
+
     private fun pipeline(
         reader: FakePageReader,
         audio: FakeAudioRepository,
         voices: FakeVoiceRepository = FakeVoiceRepository(),
         scope: TestScope,
     ) = ReadingPipelineImpl(reader, voices, audio, scope)
+
+    /**
+     * Builds a pipeline over [units] speech units with default fakes, recording
+     * every emitted state into [states] for the duration of the test.
+     */
+    private fun TestScope.pipelineWith(units: Int): ReadingPipelineImpl {
+        val reader = FakePageReader(Result.success((0 until units).map { speechUnit(it) }))
+        val p = ReadingPipelineImpl(reader, FakeVoiceRepository(), FakeAudioRepository(), this)
+        // Unconfined: a StandardTestDispatcher collector can miss the terminal
+        // emission (a queued resume that never gets its turn before the test
+        // body inspects `states`); Unconfined resumes inline on every emission,
+        // same as the file's other manual state-collection tests.
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { p.state.collect { states += it } }
+        return p
+    }
 
     @Test
     fun `surfaces units in reading order even when synthesis finishes out of order`() = runTest {
@@ -121,6 +141,37 @@ class ReadingPipelineImplTest {
 
     // ---- Hardening: a thrown (not returned) repository fault must terminate ----
 
+    @Test fun `preparing carries every unit so the reader can grey out the rest`() = runTest {
+        val pipeline = pipelineWith(units = 3)
+        pipeline.start(pageImage())
+        advanceUntilIdle()
+
+        val seen = states.filterIsInstance<PipelineState.Preparing>()
+        assertTrue("expected at least one Preparing", seen.isNotEmpty())
+        seen.forEach { assertEquals(3, it.units.size) }
+    }
+
+    @Test fun `ready carries the page image the units came from`() = runTest {
+        val image = pageImage()
+        val pipeline = pipelineWith(units = 2)
+
+        pipeline.start(image)
+        advanceUntilIdle()
+
+        val ready = states.filterIsInstance<PipelineState.Ready>().last()
+        assertSame(image, ready.image)
+    }
+
+    @Test fun `preparing carries the page image too`() = runTest {
+        val image = pageImage()
+        val pipeline = pipelineWith(units = 3)
+
+        pipeline.start(image)
+        advanceUntilIdle()
+
+        states.filterIsInstance<PipelineState.Preparing>().forEach { assertSame(image, it.image) }
+    }
+
     @Test
     fun `a synthesis repository that throws still reaches a terminal Failed`() = runTest {
         val reader = FakePageReader(Result.success((0..2).map { speechUnit(it) }))
@@ -146,6 +197,8 @@ class ReadingPipelineImplTest {
             p.start(pageImage())
             assertEquals(PipelineState.Reading, awaitItem())
             val failed = awaitItem() as PipelineState.Failed
+            // Network is correct here and stays: ThrowingPageReader throws a real
+            // IOException, which is exactly what that reason is for.
             assertEquals(FailureReason.Network, failed.reason)
             assertTrue(failed.retryable)
             cancelAndIgnoreRemainingEvents()
@@ -177,7 +230,11 @@ class ReadingPipelineImplTest {
             p.start(pageImage())
             assertEquals(PipelineState.Reading, awaitItem())
             val failed = awaitItem() as PipelineState.Failed
-            assertEquals(FailureReason.Network, failed.reason)
+            // Unknown, not Network. A spurious cancellation is not evidence of a
+            // connection problem, and this assertion used to encode that lie --
+            // the same lie that reported an exhausted token budget as "check your
+            // internet" and sent a day's debugging at the wifi.
+            assertEquals(FailureReason.Unknown, failed.reason)
             assertTrue(failed.retryable)
             cancelAndIgnoreRemainingEvents()
         }
@@ -317,7 +374,7 @@ private class ThrowingAudioRepository : AudioRepository {
 }
 
 private class ThrowingPageReader : PageReader {
-    override suspend fun read(image: PageImage): Result<List<SpeechUnit>> =
+    override suspend fun read(image: PageImage): Result<ParsedPage> =
         throw java.io.IOException("socket closed")
 }
 
@@ -327,13 +384,13 @@ private class CancellingAudioRepository : AudioRepository {
 }
 
 private class CancellingPageReader : PageReader {
-    override suspend fun read(image: PageImage): Result<List<SpeechUnit>> =
+    override suspend fun read(image: PageImage): Result<ParsedPage> =
         throw CancellationException("spurious")
 }
 
 private class SlowPageReader(private val units: List<SpeechUnit>) : PageReader {
-    override suspend fun read(image: PageImage): Result<List<SpeechUnit>> {
+    override suspend fun read(image: PageImage): Result<ParsedPage> {
         delay(100)
-        return Result.success(units)
+        return Result.success(ParsedPage(units))
     }
 }

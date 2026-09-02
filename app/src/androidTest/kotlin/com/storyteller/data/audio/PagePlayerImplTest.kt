@@ -162,7 +162,7 @@ class PagePlayerImplTest {
             delay(1000)
             assertEquals(
                 "playlist merely ran dry pending more units; must not be Finished yet",
-                PlaybackState.Playing,
+                PlaybackState.Playing(0),
                 player.state.value,
             )
 

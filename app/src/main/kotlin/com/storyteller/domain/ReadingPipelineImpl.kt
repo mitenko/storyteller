@@ -77,8 +77,8 @@ class ReadingPipelineImpl(
             job = scope.launch {
                 guarded(myEpoch) {
                     if (cached != null) {
-                        setState(myEpoch, PipelineState.Preparing(ready = emptyList(), total = cached.size))
-                        prepareAll(cached, myEpoch)
+                        setState(myEpoch, PipelineState.Preparing(cached, emptyList(), image))
+                        prepareAll(cached, myEpoch, image)
                     } else {
                         run(image, myEpoch)
                     }
@@ -114,12 +114,12 @@ class ReadingPipelineImpl(
             // Rethrowing it would leave the reader spinning, because a
             // CancellationException out of a launch body is reported to nobody.
             if (currentCoroutineContext().isActive) {
-                setState(myEpoch, PipelineState.Failed(e.toReason(FailureReason.Network), retryable = true))
+                setState(myEpoch, PipelineState.Failed(e.toReason(FailureReason.Unknown), retryable = true))
             } else {
                 throw e // genuinely cancelled: structured concurrency, nothing to report
             }
         } catch (e: Throwable) {
-            setState(myEpoch, PipelineState.Failed(e.toReason(FailureReason.Network), retryable = true))
+            setState(myEpoch, PipelineState.Failed(e.toReason(FailureReason.Unknown), retryable = true))
         }
     }
 
@@ -133,21 +133,26 @@ class ReadingPipelineImpl(
     private suspend fun run(image: PageImage, myEpoch: Long) {
         setState(myEpoch, PipelineState.Reading)
 
-        val units = pageReader.read(image).getOrElse { e ->
-            setState(myEpoch, PipelineState.Failed(e.toReason(FailureReason.Network), retryable = true))
+        val page = pageReader.read(image).getOrElse { e ->
+            setState(myEpoch, PipelineState.Failed(e.toReason(FailureReason.Unknown), retryable = true))
             return
         }
+        val units = page.units
         if (units.isEmpty()) {
             setState(myEpoch, PipelineState.Failed(FailureReason.NoTextFound, retryable = true))
             return
         }
 
-        synchronized(lock) { if (epoch == myEpoch) parsed = units }
-        setState(myEpoch, PipelineState.Preparing(ready = emptyList(), total = units.size))
-        prepareAll(units, myEpoch)
+        synchronized(lock) {
+            if (epoch == myEpoch) {
+                parsed = units
+            }
+        }
+        setState(myEpoch, PipelineState.Preparing(units, emptyList(), image))
+        prepareAll(units, myEpoch, image)
     }
 
-    private suspend fun prepareAll(units: List<SpeechUnit>, myEpoch: Long) = coroutineScope {
+    private suspend fun prepareAll(units: List<SpeechUnit>, myEpoch: Long, image: PageImage) = coroutineScope {
         val gate = Semaphore(MAX_IN_FLIGHT_SYNTHESES)
         // Launch every unit concurrently, then await in index order. Concurrency
         // without losing reading order.
@@ -164,9 +169,9 @@ class ReadingPipelineImpl(
                 return@coroutineScope
             }
             ready += prepared
-            setState(myEpoch, PipelineState.Preparing(ready.toList(), units.size))
+            setState(myEpoch, PipelineState.Preparing(units, ready.toList(), image))
         }
-        setState(myEpoch, PipelineState.Ready(ready.toList()))
+        setState(myEpoch, PipelineState.Ready(ready.toList(), image))
     }
 
     /**
@@ -186,6 +191,12 @@ class ReadingPipelineImpl(
     }
 }
 
+/**
+ * [default] is what an exception this cannot identify becomes. Call sites pass the
+ * reason that fits the step they guard; none of them should pass [FailureReason
+ * .Network], because "check your connection" is a specific claim and an
+ * unrecognised exception is not evidence for it.
+ */
 private fun Throwable.toReason(default: FailureReason): FailureReason = when (this) {
     is java.io.IOException -> FailureReason.Network
     is kotlinx.serialization.SerializationException -> FailureReason.Parse

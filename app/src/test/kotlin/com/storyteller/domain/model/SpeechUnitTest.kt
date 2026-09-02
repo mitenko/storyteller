@@ -7,6 +7,22 @@ class SpeechUnitTest {
 
     private fun parsed(speaker: String, text: String) = ParsedUnit(speaker, text, bounds = null)
 
+    /**
+     * The mapper copies field by field, so adding a property to both data classes
+     * and forgetting this function compiles, passes every other test in the suite,
+     * and leaves the property silently null on every unit -- indistinguishable
+     * from a model that never returned one.
+     */
+    @Test
+    fun `toSpeechUnits carries the panel, not only the bounds`() {
+        val panel = BoundingBox(0f, 0f, 1f, 0.5f)
+        val units = listOf(
+            ParsedUnit("Wolf", "HI", bounds = BoundingBox(0.1f, 0.1f, 0.2f, 0.2f), panel = panel),
+        ).toSpeechUnits()
+
+        assertEquals(panel, units[0].panel)
+    }
+
     @Test
     fun `assigns indices from list order`() {
         val units = listOf(

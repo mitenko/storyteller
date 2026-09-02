@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface VoiceDao {
@@ -21,6 +22,9 @@ interface VoiceDao {
 interface ParsedPageDao {
     @Query("SELECT * FROM parsed_page WHERE imageHash = :hash")
     suspend fun find(hash: String): ParsedPageEntity?
+
+    @Query("SELECT * FROM parsed_page WHERE imageHash = :hash AND parseVersion = :version")
+    suspend fun findCurrent(hash: String, version: Int): ParsedPageEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: ParsedPageEntity)
@@ -42,4 +46,13 @@ interface VoiceListDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun put(entity: VoiceListEntity)
+}
+
+@Dao
+interface SettingsDao {
+    @Query("SELECT * FROM settings WHERE key = :key")
+    fun observe(key: String): Flow<SettingEntity?>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun put(entity: SettingEntity)
 }

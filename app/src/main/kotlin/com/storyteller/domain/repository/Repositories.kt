@@ -1,15 +1,18 @@
 package com.storyteller.domain.repository
 
 import com.storyteller.domain.model.PageImage
+import com.storyteller.domain.model.ParsedPage
 import com.storyteller.domain.model.PlaybackState
 import com.storyteller.domain.model.PreparedUnit
-import com.storyteller.domain.model.SpeechUnit
+import com.storyteller.domain.model.ReadingMode
+import com.storyteller.domain.model.ThemeChoice
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
 
-/** Reads the page and attributes speakers in one vision call. Caches by image bytes. */
+/** Reads the page and attributes each line to a speaker in one vision call. */
 interface PageReader {
-    suspend fun read(image: PageImage): Result<List<SpeechUnit>>
+    suspend fun read(image: PageImage): Result<ParsedPage>
 }
 
 /** Returns the voice for a character, assigning and persisting one on first sight. */
@@ -35,4 +38,11 @@ interface PagePlayer {
      */
     fun endOfPage()
     fun stop()
+}
+
+interface SettingsRepository {
+    val mode: Flow<ReadingMode>
+    suspend fun setMode(mode: ReadingMode)
+    val theme: Flow<ThemeChoice>
+    suspend fun setTheme(theme: ThemeChoice)
 }
