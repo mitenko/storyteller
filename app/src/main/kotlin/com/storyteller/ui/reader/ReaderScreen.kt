@@ -1,5 +1,12 @@
 package com.storyteller.ui.reader
 
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.material3.FabPosition
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.ui.unit.Dp
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
@@ -33,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -88,7 +96,26 @@ fun ReaderContent(
     onLineTapped: (Int) -> Unit = {},
     listState: LazyListState = rememberLazyListState(),
 ) {
-    ReaderFrame { padding ->
+    ReaderFrame(
+        floatingActionButton = {
+            // Only while a page is actually on screen. During the read there is
+            // nothing yet to move on FROM, and the error branch offers its own way
+            // out alongside Try again.
+            if (state is ReaderUiState.Playing) {
+                FloatingActionButton(
+                    onClick = onBack,
+                    modifier = Modifier
+                        .navigationBarsPadding()
+                        .testTag(NEXT_PAGE_FAB_TEST_TAG),
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_photo_camera),
+                        contentDescription = "Read the next page",
+                    )
+                }
+            }
+        },
+    ) { padding ->
         Column(
             Modifier.fillMaxSize().padding(padding).padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -129,32 +156,45 @@ fun ReaderContent(
                         state = listState,
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(16.dp),
+                        // Room under the last card for the floating button, which
+                        // would otherwise sit on top of that card's final line and
+                        // cover the one thing it is meant not to interrupt.
+                        contentPadding = PaddingValues(bottom = FAB_CLEARANCE),
                     ) {
                         itemsIndexed(
                             state.panels,
                             key = { _, group -> group.lines.first().index },
-                        ) { _, group ->
+                        ) { index, group ->
                             PanelCard(
                                 group = group,
                                 image = state.image,
                                 playingIndex = state.playingIndex,
+                                nextLine = state.nextLine,
                                 onLineTapped = {
                                     scrollSuspended = false
                                     onLineTapped(it)
                                 },
                             )
+                            // A visible break between panels. Whitespace alone left
+                            // two stacked pictures reading as one tall picture,
+                            // which is the wrong unit: a panel is a moment, and the
+                            // page is a sequence of them.
+                            if (index < state.panels.lastIndex) {
+                                HorizontalDivider(
+                                    Modifier.padding(top = 16.dp),
+                                    color = MaterialTheme.colorScheme.outlineVariant,
+                                )
+                            }
                         }
                     }
 
                     if (state.playback == PlaybackState.Finished && state.mode == ReadingMode.Auto) {
                         Text("The End.", style = MaterialTheme.typography.titleMedium)
                     }
-
-                    // ...and one way out, offered from the moment lines appear rather
-                    // than only once Finished, because a child may want to move on to
-                    // the next page early. Before this, the successful path had no
-                    // control at all - "Take another photo" existed only under Error.
-                    Button(onClick = onBack) { Icon(painter = painterResource(R.drawable.ic_photo_camera), contentDescription = "Take another photo") }
+                    // The way on to the next page is the FAB now, not a button
+                    // here. It used to be both, and two controls for one action is
+                    // worse than one - the same argument ReaderFrame already makes
+                    // about not adding a back arrow beside it.
                 }
 
                 is ReaderUiState.Error -> Centered {
@@ -175,8 +215,19 @@ fun ReaderContent(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ReaderFrame(content: @Composable (PaddingValues) -> Unit) {
-    Scaffold(topBar = { TopAppBar(title = { Text("Storyteller") }) }) { padding ->
+private fun ReaderFrame(
+    floatingActionButton: @Composable () -> Unit = {},
+    content: @Composable (PaddingValues) -> Unit,
+) {
+    Scaffold(
+        topBar = { TopAppBar(title = { Text("Storyteller") }) },
+        floatingActionButton = floatingActionButton,
+        // Lower LEFT, not the conventional right: a child holds a phone in both
+        // hands to look at a picture book, and the right thumb is the one that
+        // brushes the screen while scrolling. It is also well clear of the line
+        // rows, which is where every other tap on this screen lands.
+        floatingActionButtonPosition = FabPosition.Start,
+    ) { padding ->
         content(padding)
     }
 }
@@ -191,6 +242,26 @@ private fun Centered(content: @Composable () -> Unit) {
 }
 
 internal const val NOT_READY_ALPHA = 0.4f
+
+/**
+ * Space left below the last card for the floating button to sit over.
+ *
+ * A 56dp FAB plus its 16dp margin, doubled: the button is bottom-left and the
+ * line rows run full width, so half-clearance would still leave it covering the
+ * last panel's final line - the one a child is most likely to be reaching for
+ * when they get there.
+ */
+private val FAB_CLEARANCE = 96.dp
+
+/** Test-only handle for the "read the next page" button. */
+internal const val NEXT_PAGE_FAB_TEST_TAG = "next_page_fab"
+
+/**
+ * The ring drawn around the line a child should tap next. Thick enough for a
+ * small child to pick out at arm's length without being a second sounding marker.
+ */
+private val NEXT_LINE_BORDER = 2.dp
+private val NEXT_LINE_CORNER = 12.dp
 
 /**
  * The alpha a line's content renders at (I2) - pulled out to a plain,
@@ -247,6 +318,7 @@ internal fun PanelCard(
     playingIndex: Int?,
     onLineTapped: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    nextLine: Int? = null,
 ) {
     val first = group.lines.first()
     val bitmap by produceState<ImageBitmap?>(null, group.panel, first.index, first.bounds, image) {
@@ -296,6 +368,7 @@ internal fun PanelCard(
             LineRow(
                 line = line,
                 sounding = playingIndex == line.index,
+                isNext = nextLine == line.index,
                 onTap = { onLineTapped(line.index) },
             )
         }
@@ -309,6 +382,7 @@ internal fun LineRow(
     sounding: Boolean,
     onTap: () -> Unit,
     modifier: Modifier = Modifier,
+    isNext: Boolean = false,
 ) {
     Column(
         modifier
@@ -318,8 +392,25 @@ internal fun LineRow(
                 enabled = line.audioReady,
                 onClick = onTap,
             )
+            // The ring goes OUTSIDE the alpha, so it stays solid on a line whose
+            // audio is still being synthesised. That line is still the right one
+            // to aim at; it is just not ready yet, and a ghosted target would say
+            // the opposite.
+            .then(
+                if (isNext) {
+                    Modifier
+                        .clip(RoundedCornerShape(NEXT_LINE_CORNER))
+                        .border(
+                            NEXT_LINE_BORDER,
+                            MaterialTheme.colorScheme.primary,
+                            RoundedCornerShape(NEXT_LINE_CORNER),
+                        )
+                } else {
+                    Modifier
+                },
+            )
             .alpha(contentAlphaFor(line.audioReady))
-            .padding(vertical = 4.dp),
+            .padding(vertical = 4.dp, horizontal = if (isNext) 8.dp else 0.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(line.speaker, style = MaterialTheme.typography.labelLarge)

@@ -43,6 +43,30 @@ sealed interface ReaderUiState {
          * the flatMap costs nothing.
          */
         val lines: List<Line> get() = panels.flatMap { it.lines }
+
+        /**
+         * The line a child should tap next, or null when the page is done.
+         *
+         * A pre-reader cannot read ahead to work out where to go next, so the
+         * reader rings this line to point at it. Shown in BOTH modes: in Tap it is
+         * the instruction, and in Auto it previews what is coming.
+         *
+         * [PlaybackState.Idle] is what separates a page nothing has played yet
+         * (ring the first line) from one where the first line has just finished
+         * (ring the second). Without it, a fresh page would point past the line it
+         * wants the child to start on, because [current] already reads 0.
+         *
+         * Derived, not stored, for the same reason as [lines]: a second copy could
+         * disagree with the playback state it is supposed to describe.
+         */
+        val nextLine: Int? get() {
+            val candidate = when {
+                playingIndex != null -> playingIndex + 1
+                playback == PlaybackState.Idle -> 0
+                else -> current + 1
+            }
+            return candidate.takeIf { it in lines.indices }
+        }
     }
     data class Error(val message: String, val canRetry: Boolean) : ReaderUiState
 
