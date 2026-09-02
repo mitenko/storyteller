@@ -1,6 +1,13 @@
 package com.storyteller.domain.model
 
-enum class FailureReason { NoTextFound, Network, Parse, Synthesis }
+/**
+ * [Unknown] exists because the alternative was lying. Every unclassified failure
+ * used to be reported as [Network], so a page whose token budget was exhausted by
+ * the model's own thinking told the user to check their internet connection --
+ * and cost an afternoon of looking at wifi rather than at the response. A vague
+ * true message beats a specific false one.
+ */
+enum class FailureReason { NoTextFound, Network, Parse, Synthesis, Unknown }
 
 sealed interface PipelineState {
     data object Idle : PipelineState

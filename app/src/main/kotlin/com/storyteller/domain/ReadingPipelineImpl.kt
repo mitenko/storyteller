@@ -114,12 +114,12 @@ class ReadingPipelineImpl(
             // Rethrowing it would leave the reader spinning, because a
             // CancellationException out of a launch body is reported to nobody.
             if (currentCoroutineContext().isActive) {
-                setState(myEpoch, PipelineState.Failed(e.toReason(FailureReason.Network), retryable = true))
+                setState(myEpoch, PipelineState.Failed(e.toReason(FailureReason.Unknown), retryable = true))
             } else {
                 throw e // genuinely cancelled: structured concurrency, nothing to report
             }
         } catch (e: Throwable) {
-            setState(myEpoch, PipelineState.Failed(e.toReason(FailureReason.Network), retryable = true))
+            setState(myEpoch, PipelineState.Failed(e.toReason(FailureReason.Unknown), retryable = true))
         }
     }
 
@@ -134,7 +134,7 @@ class ReadingPipelineImpl(
         setState(myEpoch, PipelineState.Reading)
 
         val page = pageReader.read(image).getOrElse { e ->
-            setState(myEpoch, PipelineState.Failed(e.toReason(FailureReason.Network), retryable = true))
+            setState(myEpoch, PipelineState.Failed(e.toReason(FailureReason.Unknown), retryable = true))
             return
         }
         val units = page.units
@@ -191,6 +191,12 @@ class ReadingPipelineImpl(
     }
 }
 
+/**
+ * [default] is what an exception this cannot identify becomes. Call sites pass the
+ * reason that fits the step they guard; none of them should pass [FailureReason
+ * .Network], because "check your connection" is a specific claim and an
+ * unrecognised exception is not evidence for it.
+ */
 private fun Throwable.toReason(default: FailureReason): FailureReason = when (this) {
     is java.io.IOException -> FailureReason.Network
     is kotlinx.serialization.SerializationException -> FailureReason.Parse

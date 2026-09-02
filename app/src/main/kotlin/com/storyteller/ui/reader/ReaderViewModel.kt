@@ -306,4 +306,6 @@ private fun FailureReason.message(): String = when (this) {
         "Something came back garbled. Try that page again."
     FailureReason.Synthesis ->
         "Couldn't make the voices for this page. Try again."
+    FailureReason.Unknown ->
+        "Something went wrong reading this page. Try again."
 }

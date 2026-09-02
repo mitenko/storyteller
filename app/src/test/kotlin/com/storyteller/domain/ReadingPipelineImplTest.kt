@@ -197,6 +197,8 @@ class ReadingPipelineImplTest {
             p.start(pageImage())
             assertEquals(PipelineState.Reading, awaitItem())
             val failed = awaitItem() as PipelineState.Failed
+            // Network is correct here and stays: ThrowingPageReader throws a real
+            // IOException, which is exactly what that reason is for.
             assertEquals(FailureReason.Network, failed.reason)
             assertTrue(failed.retryable)
             cancelAndIgnoreRemainingEvents()
@@ -228,7 +230,11 @@ class ReadingPipelineImplTest {
             p.start(pageImage())
             assertEquals(PipelineState.Reading, awaitItem())
             val failed = awaitItem() as PipelineState.Failed
-            assertEquals(FailureReason.Network, failed.reason)
+            // Unknown, not Network. A spurious cancellation is not evidence of a
+            // connection problem, and this assertion used to encode that lie --
+            // the same lie that reported an exhausted token budget as "check your
+            // internet" and sent a day's debugging at the wifi.
+            assertEquals(FailureReason.Unknown, failed.reason)
             assertTrue(failed.retryable)
             cancelAndIgnoreRemainingEvents()
         }

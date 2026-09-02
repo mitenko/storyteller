@@ -18,6 +18,7 @@ import com.storyteller.domain.ocr.PageLocalizer
 import com.storyteller.domain.repository.PageReader
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -28,7 +29,23 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
-private const val MAX_TOKENS = 2048
+/**
+ * Generous because thinking tokens are spent from this same budget.
+ *
+ * Sonnet 5 thinks adaptively — it decides per request whether to reason first, and
+ * that cannot be turned off. On one device page it spent all 2048 tokens thinking
+ * and returned a lone thinking block with no answer at all (`stop_reason:
+ * max_tokens`, `thinking_tokens: 2048`); re-running the identical request later
+ * produced 0 thinking tokens and a complete answer. So the failure is intermittent
+ * rather than systematic, which is worse: it cannot be reproduced on demand and it
+ * strands a child mid-story at random.
+ *
+ * A measured answer for a ten-unit page is 710-780 output tokens. 8192 leaves room
+ * for a long reasoning pass and the answer behind it. It costs nothing when unused
+ * — output tokens are billed as generated, and this is a ceiling, not a target.
+ * Raising it did not induce more thinking when measured.
+ */
+private const val MAX_TOKENS = 8192
 
 @Serializable
 private data class BoundsDto(val x1: Float, val y1: Float, val x2: Float, val y2: Float)
@@ -133,8 +150,12 @@ class PageReaderImpl(
     private fun requestBody(image: PageImage): JsonObject = buildJsonObject {
         put("model", PAGE_VISION_MODEL.id)
         put("max_tokens", MAX_TOKENS)
-        // No "thinking", no "cache_control", and no effort inside output_config:
-        // see Global Constraints. Sending any of them is a defect, not a tuning knob.
+        // No "cache_control": the prefix is too small to hit. `effort` is left
+        // unset so the model's default applies -- it IS accepted by Sonnet 5,
+        // unlike Haiku 4.5 where this comment originally forbade it, but lowering
+        // it was measured and changed neither the answer nor the thinking, so
+        // there is nothing to buy. `thinking` cannot be disabled on this model at
+        // all; MAX_TOKENS is sized for that.
         putJsonObject("output_config") {
             putJsonObject("format") {
                 put("type", "json_schema")
@@ -179,12 +200,34 @@ class PageReaderImpl(
         }
     }
 
-    /** Structured outputs guarantees the first text block is the JSON payload. */
-    private fun JsonObject.textBlock(): String =
-        this["content"]!!.jsonArray
-            .map { it.jsonObject }
-            .first { it["type"]?.jsonPrimitive?.content == "text" }["text"]!!
-            .jsonPrimitive.content
+    /**
+     * The JSON payload, from the first text block. A thinking block may precede it
+     * on a model that reasons, which is why this searches rather than takes [0].
+     *
+     * When there is no text block at all, the failure is described rather than
+     * thrown as a bare `NoSuchElementException`. That exception carries no
+     * information, and worse, it fell through the pipeline's classifier to the
+     * `Network` default and told the user to check their internet connection while
+     * the actual cause was a token budget exhausted by thinking. The message names
+     * `stop_reason` and the block types present, because those two facts identify
+     * the cause immediately.
+     *
+     * SerializationException specifically: the response did not have the shape the
+     * protocol requires, which is what that exception means, and it is what the
+     * pipeline maps to a "came back garbled" message rather than a network one.
+     */
+    private fun JsonObject.textBlock(): String {
+        val blocks = this["content"]!!.jsonArray.map { it.jsonObject }
+        val text = blocks.firstOrNull { it["type"]?.jsonPrimitive?.content == "text" }
+            ?: throw SerializationException(
+                "the response carried no text block. stop_reason=" +
+                    "${this["stop_reason"]?.jsonPrimitive?.content}, blocks=" +
+                    blocks.mapNotNull { it["type"]?.jsonPrimitive?.content } +
+                    ". A stop_reason of max_tokens here means the whole budget went " +
+                    "on thinking, leaving nothing for the answer.",
+            )
+        return text["text"]!!.jsonPrimitive.content
+    }
 
     /**
      * Pixels in, fractions out. The domain model stays normalised so `cropRect`,
