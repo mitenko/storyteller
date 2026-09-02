@@ -234,9 +234,9 @@ class ReaderViewModel @Inject constructor(
 
     /**
      * Every unit renders; only the synthesized ones are marked ready. [current]
-     * is clamped here (not just in [moveTo]) because a page's unit count is only
-     * ever known once this state is built - a shorter page than the one on
-     * screen must not leave a stale index pointing past its last line.
+     * is clamped here, as well as in [onLineTapped], because a page's unit count
+     * is only ever known once this state is built - a shorter page than the one
+     * on screen must not leave a stale index pointing past its last line.
      */
     private fun playingState(
         all: List<SpeechUnit>,
@@ -291,12 +291,22 @@ class ReaderViewModel @Inject constructor(
             ReadingMode.Auto -> lastReady.filter { it.unit.index >= bounded }
         }
         player.play(playlist)
-        player.endOfPage()
+        // endOfPage() only when nothing more is coming for this page.
+        // PagePlayerImpl.pageComplete is a STICKY flag cleared only by play()/
+        // stop(), so calling this on an Auto tap that jumps ahead of a
+        // still-synthesising page would arm Finished for every later playlist
+        // starvation, not just this one - "The End." would flash and the
+        // sounding marker would drop, then recover only once the next append
+        // resumes playback. This is self-completing: once PipelineState.Ready
+        // arrives, the Auto branch there calls endOfPage() anyway.
+        if (mode == ReadingMode.Tap || lastReady.size == state.lines.size) player.endOfPage()
         playlistUnits = playlist.map { it.unit.index }
         // The playlist was REPLACED, so every ready unit is now either in it or
         // deliberately behind it. Without this, queue() diffs the next cumulative
-        // `ready` against a stale count and silently drops a unit.
-        queued = lastReady.size
+        // `ready` against a stale count and silently drops a unit. Scoped to
+        // Auto: queue() is gated on `mode == Auto`, so in Tap mode this value is
+        // never read - a Tap tap never calls queue().
+        if (mode == ReadingMode.Auto) queued = lastReady.size
 
         _uiState.value = state.copy(current = bounded, playingIndex = bounded)
     }

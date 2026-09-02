@@ -1,17 +1,22 @@
 package com.storyteller.ui.reader
 
 import android.graphics.Bitmap
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
 import com.storyteller.domain.model.BoundingBox
 import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.PlaybackState
@@ -219,8 +224,10 @@ class ReaderScreenTest {
      * passes `image = null`, so without this one nothing above `cropBubble`'s
      * own unit tests proves the decoded picture actually reaches the screen.
      * `playing()` hardcodes `image = null`, so this builds the `Playing`
-     * state directly instead. The image renders with contentDescription
-     * "Comic panel" (not the line's text, which is `LineText`'s own node).
+     * state directly instead. The image itself is decorative
+     * (`contentDescription = null`, F7) and carries no text of its own, so
+     * this asserts against [PANEL_IMAGE_TEST_TAG] rather than a
+     * contentDescription or the line's text (which is `LineText`'s own node).
      */
     @Test fun `a group with a real image renders the decoded panel`() {
         val bmp = Bitmap.createBitmap(800, 600, Bitmap.Config.ARGB_8888)
@@ -245,10 +252,10 @@ class ReaderScreenTest {
         // The crop decodes off the composition thread; give the produceState
         // coroutine a chance to land before asserting.
         compose.waitUntil(timeoutMillis = 5_000) {
-            compose.onAllNodesWithContentDescription("Comic panel").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithTag(PANEL_IMAGE_TEST_TAG).fetchSemanticsNodes().isNotEmpty()
         }
 
-        compose.onNodeWithContentDescription("Comic panel").assertIsDisplayed()
+        compose.onNodeWithTag(PANEL_IMAGE_TEST_TAG).assertIsDisplayed()
     }
 
     @Test fun `tapping a line reports that line's index`() {
@@ -367,5 +374,102 @@ class ReaderScreenTest {
         }
 
         compose.onNodeWithContentDescription("Sounding now").assertDoesNotExist()
+    }
+
+    // --- Auto-scroll (spec section 5) ---------------------------------------
+
+    /**
+     * Distinct per-index panel boxes so `groupByPanel` never merges these lines:
+     * exactly one group per index, which lets a target line index double as its
+     * own group index for the scroll assertions below. Long-ish text per line so
+     * thirty of them overflow any Robolectric window, making a real scroll
+     * necessary to reach a later one.
+     */
+    private fun scrollTestLines(count: Int) = (0 until count).map { i ->
+        line(
+            "Robot",
+            "line number $i with enough text to take up real vertical space on screen",
+            index = i,
+            panel = BoundingBox(0f, i * 0.02f, 1f, i * 0.02f + 0.02f),
+        )
+    }
+
+    @Test fun `the list scrolls to the group holding the sounding line once it changes`() {
+        val lines = scrollTestLines(30)
+        var playingIndex by mutableStateOf<Int?>(null)
+        lateinit var listState: LazyListState
+
+        compose.setContent {
+            listState = rememberLazyListState()
+            ReaderContent(playing(lines, playingIndex = playingIndex), onRetry = {}, onBack = {}, listState = listState)
+        }
+        compose.waitForIdle()
+        assertTrue(
+            "sanity: group 20 must not already be visible before it becomes the target",
+            listState.layoutInfo.visibleItemsInfo.none { it.index == 20 },
+        )
+
+        playingIndex = 20
+        compose.waitForIdle()
+
+        assertTrue(
+            "the list must scroll so the sounding line's group becomes visible",
+            listState.layoutInfo.visibleItemsInfo.any { it.index == 20 },
+        )
+    }
+
+    /**
+     * Drives the observable consequence spelled out in the fix-wave note, since
+     * there is no direct handle on `scrollSuspended` itself: a drag suspends
+     * auto-scroll, a tap on a line hands control back, and only THEN does a
+     * later playingIndex change reach its target - proving the tap cleared the
+     * suspension rather than the drag never having set it in the first place.
+     */
+    @Test fun `tapping a line clears the scroll suspension so a later playingIndex change scrolls again`() {
+        val lines = scrollTestLines(30)
+        var playingIndex by mutableStateOf<Int?>(null)
+        lateinit var listState: LazyListState
+
+        compose.setContent {
+            listState = rememberLazyListState()
+            ReaderContent(playing(lines, playingIndex = playingIndex), onRetry = {}, onBack = {}, listState = listState)
+        }
+        compose.waitForIdle()
+
+        // A real drag - not a programmatic scroll - is the only thing that sets
+        // scrollSuspended: collectIsDraggedAsState() observes DragInteraction,
+        // which only a pointer drag gesture emits. Split across two
+        // performTouchInput calls, with a waitForIdle in between, so the pointer
+        // is still down (and dragged genuinely true) when this composition
+        // settles - releasing in the same block risks Start and Stop coalescing
+        // into one recomposition that never shows `dragged == true` at all.
+        val card = compose.onAllNodesWithTag(PANEL_CARD_TEST_TAG)[0]
+        card.performTouchInput {
+            down(center)
+            moveBy(Offset(0f, -40f))
+        }
+        compose.waitForIdle()
+        card.performTouchInput { up() }
+        compose.waitForIdle()
+
+        playingIndex = 10
+        compose.waitForIdle()
+        assertTrue(
+            "a drag must suspend auto-scroll, so this playingIndex change alone must not reach group 10",
+            listState.layoutInfo.visibleItemsInfo.none { it.index == 10 },
+        )
+
+        // Line 0 was never disturbed by the small drag above, so it is still on
+        // screen here - tapping it hands control back to auto-scroll.
+        compose.onNodeWithText("line number 0 with enough text to take up real vertical space on screen")
+            .performClick()
+        compose.waitForIdle()
+
+        playingIndex = 20
+        compose.waitForIdle()
+        assertTrue(
+            "tapping a line must clear the suspension, so a later playingIndex change scrolls again",
+            listState.layoutInfo.visibleItemsInfo.any { it.index == 20 },
+        )
     }
 }

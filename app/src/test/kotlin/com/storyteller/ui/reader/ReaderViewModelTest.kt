@@ -849,4 +849,46 @@ class ReaderViewModelTest {
 
         assertEquals(2, (vm.uiState.value as ReaderUiState.Playing).playingIndex)
     }
+
+    // --- endOfPage only when nothing more is coming (fix-wave finding 1) ------
+
+    /**
+     * PagePlayerImpl.pageComplete is a STICKY flag cleared only by play()/stop().
+     * Calling endOfPage() on an Auto tap that jumps ahead of a still-synthesising
+     * page would arm Finished for every later playlist starvation, not just this
+     * one - flashing "The End." and dropping the sounding marker for the rest of
+     * the page. Six units, four ready: the tapped playlist [1, 2, 3] does not
+     * reach unit 5, so endOfPage() must not fire yet.
+     */
+    @Test fun `an Auto tap on a partially synthesised page does not call endOfPage`() = runTest {
+        val vm = readerInAutoMode(unitCount = 6, readyCount = 4)
+        val before = player.endOfPageCalls
+
+        vm.onLineTapped(1)
+
+        assertEquals(
+            "a jump that does not reach the last ready unit must not arm Finished",
+            before,
+            player.endOfPageCalls,
+        )
+    }
+
+    /**
+     * The other direction of the same fix: a tap on a page whose every unit is
+     * already synthesized IS genuinely the end of what will ever be queued, so
+     * endOfPage() must still fire - this is what makes the mechanism
+     * self-completing rather than simply removed.
+     */
+    @Test fun `an Auto tap on a fully synthesised page calls endOfPage`() = runTest {
+        val vm = readerInAutoMode(unitCount = 4)
+        val before = player.endOfPageCalls
+
+        vm.onLineTapped(1)
+
+        assertEquals(
+            "a jump that reaches every ready unit is genuinely the end of the page",
+            before + 1,
+            player.endOfPageCalls,
+        )
+    }
 }

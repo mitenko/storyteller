@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
@@ -70,13 +71,21 @@ fun ReaderScreen(
     )
 }
 
-/** Stateless, so Compose tests can drive every branch without Hilt. */
+/**
+ * Stateless, so Compose tests can drive every branch without Hilt.
+ *
+ * [listState] is hoisted (not just `remember`ed inside the Playing branch) so a
+ * test can hold onto the same instance the LazyColumn scrolls and assert on its
+ * `firstVisibleItemIndex` directly - the only way to check section 5's
+ * auto-scroll behaviour without a production-only test hook.
+ */
 @Composable
 fun ReaderContent(
     state: ReaderUiState,
     onRetry: () -> Unit,
     onBack: () -> Unit,
     onLineTapped: (Int) -> Unit = {},
+    listState: LazyListState = rememberLazyListState(),
 ) {
     ReaderFrame { padding ->
         Column(
@@ -90,7 +99,6 @@ fun ReaderContent(
                 }
 
                 is ReaderUiState.Playing -> {
-                    val listState = rememberLazyListState()
                     val dragged by listState.interactionSource.collectIsDraggedAsState()
                     // Auto-scroll follows the story until the child takes over. A
                     // drag says "I am looking at something else"; a tap says where
@@ -100,7 +108,18 @@ fun ReaderContent(
                     LaunchedEffect(state.playingIndex, scrollSuspended) {
                         val target = state.playingIndex
                             ?.let { state.panels.groupIndexOfLine(it) }
-                        if (target != null && !scrollSuspended) {
+                        // dragged/scrollSuspended is a pointer-only signal:
+                        // collectIsDraggedAsState() observes DragInteraction, which
+                        // only the pointer drag gesture emits. TalkBack (and a
+                        // keyboard user) scrolls via semantics actions instead, so
+                        // scrollSuspended can never become true for them, and the
+                        // list would be yanked to a new card at every line boundary
+                        // with no way to stop it. Skipping the animation when the
+                        // target group is ALREADY visible removes most of that
+                        // yanking for everyone, screen-reader users included,
+                        // without needing a new suspend signal.
+                        val alreadyVisible = listState.layoutInfo.visibleItemsInfo.any { it.index == target }
+                        if (target != null && !scrollSuspended && !alreadyVisible) {
                             listState.animateScrollToItem(target)
                         }
                     }
@@ -186,11 +205,21 @@ internal const val PANEL_MAX_HEIGHT_FRACTION = 0.5f
 /**
  * Test-only handle for counting cards. A card's only always-present, always-
  * unique-per-card content is its lines' own text, which a caller has no way to
- * count generically; the panel image, the one candidate semantic (content-
- * Description = "Comic panel"), only exists when a crop actually decodes. This
- * tag exists purely so a test can assert "N cards" without depending on either.
+ * count generically; the panel image only exists when a crop actually decodes,
+ * and (see [PANEL_IMAGE_TEST_TAG]) carries no contentDescription to search by
+ * either. This tag exists purely so a test can assert "N cards" without
+ * depending on either.
  */
 internal const val PANEL_CARD_TEST_TAG = "panel_card"
+
+/**
+ * Test-only handle for the decoded panel picture. The image's
+ * `contentDescription` is null - it is decorative, and an identical "Comic
+ * panel" label repeated once per card told TalkBack nothing while announcing
+ * between every group - so this tag is the only way a test can assert that a
+ * real `Image` node was emitted for a group whose crop decoded.
+ */
+internal const val PANEL_IMAGE_TEST_TAG = "panel_image"
 
 /**
  * One panel and the lines spoken in it.
@@ -235,10 +264,14 @@ internal fun PanelCard(
         bitmap?.let {
             Image(
                 bitmap = it,
-                contentDescription = "Comic panel",
+                // Decorative: the line text below carries all the available
+                // meaning, so a screen reader announcing an identical, uninformative
+                // "Comic panel" label between every group added noise, not information.
+                contentDescription = null,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = LocalConfiguration.current.screenHeightDp.dp * PANEL_MAX_HEIGHT_FRACTION),
+                    .heightIn(max = LocalConfiguration.current.screenHeightDp.dp * PANEL_MAX_HEIGHT_FRACTION)
+                    .testTag(PANEL_IMAGE_TEST_TAG),
                 contentScale = ContentScale.Fit,
             )
         }

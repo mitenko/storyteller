@@ -25,9 +25,8 @@ fun List<ReaderUiState.Line>.groupByPanel(): List<ReaderUiState.PanelGroup> {
     val groups = mutableListOf<ReaderUiState.PanelGroup>()
     for (line in this) {
         val last = groups.lastOrNull()
-        val extends = last != null && line.panel != null && last.panel == line.panel
-        if (extends) {
-            groups[groups.lastIndex] = last!!.copy(lines = last.lines + line)
+        if (last != null && line.panel != null && last.panel == line.panel) {
+            groups[groups.lastIndex] = last.copy(lines = last.lines + line)
         } else {
             groups += ReaderUiState.PanelGroup(panel = line.panel, lines = listOf(line))
         }

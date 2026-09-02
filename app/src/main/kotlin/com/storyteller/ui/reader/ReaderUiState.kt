@@ -27,20 +27,20 @@ sealed interface ReaderUiState {
         /**
          * The unit currently sounding, or null. Tap mode knows it because it
          * handled the tap; Auto mode takes it from the player's own playlist
-         * position. Usually equal to [current] - it diverges only when a child
-         * has tapped a line and the story has moved on past it while its
-         * audio is still playing, which is exactly the case [LineRow]'s
-         * `sounding` marker exists to show.
+         * position. Written together with [current] everywhere else, so the
+         * only real divergence is [PlaybackState.Finished] nulling this out
+         * while [current] is left pointing at the last line read.
          */
         val playingIndex: Int?,
     ) : ReaderUiState {
         /**
          * Every line on the page, in reading order.
          *
-         * Derived rather than stored. It keeps the ten existing `state.lines` call
-         * sites working, and it makes "grouping loses no line" true by
-         * construction: there is no second copy that can drift from the first.
-         * At most ten elements, so the flatMap costs nothing.
+         * Derived rather than stored. It makes "grouping loses no line" true by
+         * construction - there is no second copy that can drift from the first
+         * - and it is what [ReaderViewModel.onLineTapped] bounds a tapped index
+         * against, its one call site in app/src/main. At most ten elements, so
+         * the flatMap costs nothing.
          */
         val lines: List<Line> get() = panels.flatMap { it.lines }
     }
