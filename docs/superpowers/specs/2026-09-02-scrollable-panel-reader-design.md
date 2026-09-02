@@ -169,6 +169,47 @@ deletes `moveTo`, so `onLineTapped` sets `current` itself — and must keep
 `moveTo`'s bound (`coerceIn(0, lines.size - 1)`), which was the only thing in that
 function not specific to the arrows.
 
+### 6.1 Two bookkeeping invariants the Auto jump must not break
+
+Reviewing this section against `ReaderViewModel` found that the jump as first
+described would corrupt playback in two ways. Both are silent — the audio simply
+plays the wrong thing — so both are specified here rather than left to be
+discovered.
+
+**`queued` must be reset when the playlist is replaced.** `queued` counts how many
+units have been handed to the player, and `queue()` uses it to append only newly
+synthesised units from a cumulative `ready` list. A jump calls `player.play(...)`,
+which *replaces* the playlist, leaving `queued` describing a playlist that no
+longer exists:
+
+> 10 units, 5 ready, `queued = 5`. The child taps line 3, so the playlist becomes
+> units 3-4. Unit 5 finishes synthesising: `queue()` computes
+> `fresh = ready.drop(5)` = unit 5 alone and appends it, giving a playlist of
+> 3, 4, 6. **Unit 5 is never heard.**
+
+So an Auto jump sets `queued = lastReady.size`: every ready unit is now either in
+the playlist or deliberately skipped behind it, and the next append is correct.
+
+**`playingIndex` must be mapped, not copied.** Today the collector does
+`playingIndex = state.playlistIndex`, which is right only while the playlist is
+the whole page starting at unit 0. After a jump to unit N, playlist position 0 IS
+unit N, so copying the index marks the wrong line as sounding and auto-scrolls to
+the wrong card.
+
+The ViewModel therefore keeps the unit indices it handed to the player, in
+playlist order:
+
+```kotlin
+private var playlistUnits: List<Int> = emptyList()
+...
+playingIndex = playlistUnits.getOrNull(state.playlistIndex)
+```
+
+A list rather than an integer offset: it is no harder to maintain, it is correct
+for any playlist shape rather than only contiguous ones, and `getOrNull` makes a
+stale index a null marker instead of an exception. `queue()` and the jump both
+update it alongside `queued`.
+
 ## 7. Deletions
 
 - The previous/next control bar.
@@ -205,7 +246,10 @@ marker is on the right row; a text-only card when there is no picture.
 
 **`ReaderViewModelTest`:** `onLineTapped` in Tap mode plays one unit;
 `onLineTapped` in Auto mode plays from that index; tapping an un-ready index is a
-no-op; `current` follows the tap.
+no-op; `current` follows the tap. Plus one test per §6.1 invariant, because both
+failures are silent: a unit synthesised *after* an Auto jump is still heard and in
+order, and `playingIndex` reports the unit index rather than the playlist position
+after a jump.
 
 Existing `ReaderScreenTest` and `ReaderViewModelTest` cases that assert the paged
 model or the arrows are updated or removed with their feature.
