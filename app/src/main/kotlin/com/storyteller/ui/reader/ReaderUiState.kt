@@ -59,4 +59,15 @@ sealed interface ReaderUiState {
          */
         val panel: BoundingBox? = null,
     )
+
+    /**
+     * One comic panel and the consecutive lines spoken in it.
+     *
+     * [panel] is null for a line the model could not place in a panel; those never
+     * group, so such a group always holds exactly one line.
+     */
+    data class PanelGroup(
+        val panel: BoundingBox?,
+        val lines: List<Line>,
+    )
 }
