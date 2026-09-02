@@ -440,6 +440,87 @@ class PageReaderImplTest {
      * A page cached under the old fraction protocol must not be served to the new
      * one: v4 rows hold numbers in a different unit entirely.
      */
+    @Test fun `a panel is normalised against the uploaded image like bounds are`() = runTest {
+        // A real panel -- full width, the top 80% -- not a degenerate whole-image
+        // rectangle. It must actually CONTAIN the balloon at y 0.25-0.75, or the
+        // containment rule rejects it and this test measures that rule instead of
+        // the division arithmetic it is here for.
+        enqueueTextBlock("""{"units":[
+            {"speaker":"Wolf","text":"HI",
+             "bounds":{"x1":223.25,"y1":343,"x2":669.75,"y2":1029},
+             "panel":{"x1":0,"y1":0,"x2":893,"y2":1097.6}}
+        ],"characters":[]}""")
+
+        val u = reader().read(pageImage()).getOrThrow().units[0]
+        assertEquals(0f, u.panel!!.left, 0.0001f)
+        assertEquals(0f, u.panel!!.top, 0.0001f)
+        assertEquals(1f, u.panel!!.right, 0.0001f)
+        assertEquals(0.8f, u.panel!!.bottom, 0.0001f)
+        assertEquals("the balloon must survive alongside it", 0.25f, u.bounds!!.left, 0.0001f)
+    }
+
+    @Test fun `a null panel is carried through, not invented`() = runTest {
+        enqueueTextBlock("""{"units":[
+            {"speaker":"Wolf","text":"HI","bounds":null,"panel":null}
+        ],"characters":[]}""")
+        assertNull(reader().read(pageImage()).getOrThrow().units[0].panel)
+    }
+
+    @Test fun `a panel outside the image is rejected, not clamped`() = runTest {
+        enqueueTextBlock("""{"units":[
+            {"speaker":"Wolf","text":"HI","bounds":null,
+             "panel":{"x1":0,"y1":0,"x2":999999,"y2":10}}
+        ],"characters":[]}""")
+        assertNull(reader().read(pageImage()).getOrThrow().units[0].panel)
+    }
+
+    /**
+     * The "no visible boundary" case from the expansion research. A rectangle
+     * covering the whole image, for a unit whose balloon occupies a fraction of it,
+     * is the model declining to answer. Accepting it would render the entire page
+     * for every line while looking like a working feature.
+     */
+    @Test fun `a whole-image panel is rejected when the unit has a balloon`() = runTest {
+        enqueueTextBlock("""{"units":[
+            {"speaker":"Wolf","text":"HI","bounds":{"x1":10,"y1":10,"x2":100,"y2":100},
+             "panel":{"x1":0,"y1":0,"x2":893,"y2":1372}}
+        ],"characters":[]}""")
+        assertNull(
+            "a whole-image panel tells the reader nothing it did not already know",
+            reader().read(pageImage()).getOrThrow().units[0].panel,
+        )
+    }
+
+    /**
+     * The counterpart. A genuine full-bleed splash page IS one whole-image panel,
+     * and there is no balloon to contradict it. The distinction is the balloon, not
+     * the rectangle.
+     */
+    @Test fun `a whole-image panel is kept when there is no balloon to contradict it`() = runTest {
+        enqueueTextBlock("""{"units":[
+            {"speaker":"Narrator","text":"THE END","bounds":null,
+             "panel":{"x1":0,"y1":0,"x2":893,"y2":1372}}
+        ],"characters":[]}""")
+        assertNotNull(reader().read(pageImage()).getOrThrow().units[0].panel)
+    }
+
+    @Test fun `a panel that does not contain its own balloon is rejected`() = runTest {
+        enqueueTextBlock("""{"units":[
+            {"speaker":"Wolf","text":"HI","bounds":{"x1":500,"y1":500,"x2":600,"y2":600},
+             "panel":{"x1":0,"y1":0,"x2":200,"y2":200}}
+        ],"characters":[]}""")
+        assertNull(
+            "a panel that excludes its balloon is not that balloon's panel",
+            reader().read(pageImage()).getOrThrow().units[0].panel,
+        )
+    }
+
+    @Test fun `the prompt asks for the panel in pixels`() {
+        val i = pageInstruction(893, 1372)
+        assertTrue(i.contains("panel", ignoreCase = true))
+        assertTrue("must still ask for pixels", i.contains("pixel", ignoreCase = true))
+    }
+
     @Test fun `the request names the page vision model`() = runTest {
         enqueueTextBlock("""{"units":[],"characters":[]}""")
         reader().read(pageImage())

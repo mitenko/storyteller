@@ -42,9 +42,25 @@ val PAGE_SCHEMA: JsonObject = Json.parseToJsonElement(
                   },
                   { "type": "null" }
                 ]
+              },
+              "panel": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "x1": { "type": "number" },
+                      "y1": { "type": "number" },
+                      "x2": { "type": "number" },
+                      "y2": { "type": "number" }
+                    },
+                    "required": ["x1", "y1", "x2", "y2"],
+                    "additionalProperties": false
+                  },
+                  { "type": "null" }
+                ]
               }
             },
-            "required": ["speaker", "text", "bounds"],
+            "required": ["speaker", "text", "bounds", "panel"],
             "additionalProperties": false
           }
         },
@@ -97,6 +113,12 @@ fun pageInstruction(width: Int, height: Int): String = """
       coordinates in this $width x $height image: x1 and y1 are the top-left corner,
       x2 and y2 the bottom-right, measured from the top-left of the image. Use null
       if you cannot locate it.
+    - Set panel to the comic panel that contains that balloon, in the same
+      $width x $height pixel coordinates. A panel is the framed picture the balloon
+      sits in, bounded by the gutters or page edges around it. Include the artwork,
+      not just the balloon. Two units in the same panel must get the same panel box.
+      Use null if the page is a single full-bleed picture with no panel divisions,
+      or if you cannot tell.
 
     Also return characters: one entry per distinct character who speaks on this
     page. Do not include the narrator.

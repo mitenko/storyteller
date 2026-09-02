@@ -11,6 +11,7 @@ import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.ParsedPage
 import com.storyteller.domain.model.PAGE_VISION_MODEL
 import com.storyteller.domain.model.ParsedUnit
+import com.storyteller.domain.model.contains
 import com.storyteller.domain.model.toSpeechUnits
 import com.storyteller.domain.ocr.NoOpPageLocalizer
 import com.storyteller.domain.ocr.PageLocalizer
@@ -33,7 +34,12 @@ private const val MAX_TOKENS = 2048
 private data class BoundsDto(val x1: Float, val y1: Float, val x2: Float, val y2: Float)
 
 @Serializable
-private data class UnitDto(val speaker: String, val text: String, val bounds: BoundsDto?)
+private data class UnitDto(
+    val speaker: String,
+    val text: String,
+    val bounds: BoundsDto?,
+    val panel: BoundsDto? = null,
+)
 
 @Serializable
 private data class PageDto(val units: List<UnitDto>)
@@ -200,9 +206,36 @@ class PageReaderImpl(
         return BoundingBox(x1 / width, y1 / height, x2 / width, y2 / height)
     }
 
+    /**
+     * A panel is accepted only if it could be a panel for THIS unit.
+     *
+     * Two rejections beyond the geometry checks [toDomain] already applies. A
+     * whole-image rectangle alongside a real balloon is the model declining to
+     * answer, and rendering it would show the entire page for every line while
+     * looking like the feature working. A panel that excludes its own balloon is
+     * not that balloon's panel, whatever else it is.
+     *
+     * A whole-image panel with NO balloon is kept: that is a full-bleed splash
+     * page, and one panel is the honest answer for it.
+     */
+    private fun BoundsDto.toPanel(width: Int, height: Int, balloon: BoundingBox?): BoundingBox? {
+        val box = toDomain(width, height) ?: return null
+        if (balloon == null) return box
+        val coversImage = box.right - box.left > 0.98f && box.bottom - box.top > 0.98f
+        if (coversImage) return null
+        if (!box.contains(balloon)) return null
+        return box
+    }
+
     private fun PageDto.toDomain(width: Int, height: Int): ParsedPage = ParsedPage(
         units = units.map { u ->
-            ParsedUnit(speaker = u.speaker, text = u.text, bounds = u.bounds?.toDomain(width, height))
+            val bounds = u.bounds?.toDomain(width, height)
+            ParsedUnit(
+                speaker = u.speaker,
+                text = u.text,
+                bounds = bounds,
+                panel = u.panel?.toPanel(width, height, bounds),
+            )
         }.toSpeechUnits(),
     )
 
