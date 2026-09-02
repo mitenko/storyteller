@@ -39,6 +39,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -271,7 +272,23 @@ internal fun PanelCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(max = LocalConfiguration.current.screenHeightDp.dp * PANEL_MAX_HEIGHT_FRACTION)
-                    .testTag(PANEL_IMAGE_TEST_TAG),
+                    .testTag(PANEL_IMAGE_TEST_TAG)
+                    // The picture is the biggest thing on the card and the whole
+                    // reason the feature exists, so a child shown a picture with
+                    // squiggles under it taps the PICTURE. Before this it was inert
+                    // and only the ~50dp text row responded, which reads as the app
+                    // being broken rather than as a smaller target.
+                    //
+                    // It plays the group's first line: exactly what tapping that
+                    // line's own row does, so there is one rule rather than two.
+                    .clickable(enabled = first.audioReady) { onLineTapped(first.index) }
+                    // Hidden from the accessibility tree, not labelled. It is a
+                    // redundant target for the same action the row below already
+                    // exposes with a proper name; a clickable node with a null
+                    // contentDescription would give TalkBack a focusable action it
+                    // cannot announce, and labelling it would announce every panel
+                    // twice.
+                    .clearAndSetSemantics { },
                 contentScale = ContentScale.Fit,
             )
         }

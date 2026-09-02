@@ -229,6 +229,49 @@ class ReaderScreenTest {
      * this asserts against [PANEL_IMAGE_TEST_TAG] rather than a
      * contentDescription or the line's text (which is `LineText`'s own node).
      */
+    /**
+     * The picture is the biggest thing on a card and the reason the feature
+     * exists, so a child shown a picture with squiggles beneath it taps the
+     * PICTURE. Before this it was inert and only the ~50dp text row responded,
+     * which reads as the app being broken rather than as a smaller target.
+     *
+     * It reports the group's FIRST line — the same line tapping that row reports —
+     * so there is one rule rather than two. This test would fail if the image
+     * stopped being clickable, or if it reported some other line.
+     */
+    @Test fun `tapping the panel picture reports the group's first line`() {
+        var tapped: Int? = null
+        val bmp = Bitmap.createBitmap(800, 600, Bitmap.Config.ARGB_8888)
+        val bytes = ByteArrayOutputStream().also { bmp.compress(Bitmap.CompressFormat.JPEG, 90, it) }.toByteArray()
+        val panel = BoundingBox(0.1f, 0.1f, 0.9f, 0.9f)
+
+        compose.setContent {
+            ReaderContent(
+                state = ReaderUiState.Playing(
+                    // Two lines in ONE panel: a tap on the picture must report the
+                    // first of them, not the last rendered or the card's position.
+                    panels = listOf(
+                        line("Bear", "first line", index = 0, panel = panel),
+                        line("Bear", "second line", index = 1, panel = panel),
+                    ).groupByPanel(),
+                    current = 0,
+                    image = PageImage(bytes, "image/jpeg"),
+                    playback = PlaybackState.Playing(0),
+                    mode = ReadingMode.Auto,
+                    playingIndex = null,
+                ),
+                onRetry = {}, onBack = {}, onLineTapped = { tapped = it },
+            )
+        }
+
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodesWithTag(PANEL_IMAGE_TEST_TAG).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag(PANEL_IMAGE_TEST_TAG).performClick()
+
+        assertEquals(0, tapped)
+    }
+
     @Test fun `a group with a real image renders the decoded panel`() {
         val bmp = Bitmap.createBitmap(800, 600, Bitmap.Config.ARGB_8888)
         val bytes = ByteArrayOutputStream().also { bmp.compress(Bitmap.CompressFormat.JPEG, 90, it) }.toByteArray()
