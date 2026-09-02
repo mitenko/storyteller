@@ -4,6 +4,7 @@ import android.graphics.BitmapFactory
 import android.os.Build
 import android.util.Log
 import com.storyteller.data.local.PARSE_VERSION
+import com.storyteller.domain.model.BoundingBox
 import com.storyteller.domain.model.PAGE_VISION_MODEL
 import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.ParsedPage
@@ -153,18 +154,29 @@ class DiagnosticWriterImpl(private val root: File) : DiagnosticWriter {
         return opts.outWidth to opts.outHeight
     }
 
+    /**
+     * Hand-written rather than serialized, so every field of [ParsedPage] has to be
+     * added here by hand too. That makes it a silent-drop point: a field missing
+     * from this function is indistinguishable, in a pulled bundle, from a field the
+     * model never returned or validation rejected — which is exactly what happened
+     * to `panel` on its first device run, and exactly the distinction the
+     * diagnostic exists to make. Both boxes are pinned by DiagnosticWriterImplTest.
+     */
     private fun parseJson(parsed: ParsedPage): String {
         val units = parsed.units.joinToString(",\n") { u ->
-            val b = u.bounds
-            val bounds = if (b == null) {
-                "null"
-            } else {
-                """{"left": ${b.left}, "top": ${b.top}, "right": ${b.right}, "bottom": ${b.bottom}}"""
-            }
-            """    {"index": ${u.index}, "speaker": ${quote(u.speaker)}, "text": ${quote(u.text)}, "bounds": $bounds}"""
+            """    {"index": ${u.index}, "speaker": ${quote(u.speaker)}, """ +
+                """"text": ${quote(u.text)}, "bounds": ${boxJson(u.bounds)}, """ +
+                """"panel": ${boxJson(u.panel)}}"""
         }
         return "{\n  \"units\": [\n$units\n  ]\n}"
     }
+
+    private fun boxJson(b: BoundingBox?): String =
+        if (b == null) {
+            "null"
+        } else {
+            """{"left": ${b.left}, "top": ${b.top}, "right": ${b.right}, "bottom": ${b.bottom}}"""
+        }
 
     private fun quote(s: String): String =
         "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\""

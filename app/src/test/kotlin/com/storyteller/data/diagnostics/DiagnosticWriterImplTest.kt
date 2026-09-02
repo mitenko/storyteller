@@ -6,6 +6,7 @@ import com.storyteller.domain.model.BoundingBox
 import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.ParsedPage
 import com.storyteller.domain.model.ParsedUnit
+import com.storyteller.domain.model.SpeechUnit
 import com.storyteller.domain.model.toSpeechUnits
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -116,5 +117,32 @@ class DiagnosticWriterImplTest {
         val notADirectory = temp.newFile("occupied")
 
         DiagnosticWriterImpl(notADirectory).record(pageImage(), """{"units":[]}""", parsed())
+    }
+
+    /**
+     * The diagnostic is how a wrong crop gets diagnosed off-device, so a field it
+     * omits is a field nobody can check. `panel` was absent on its first device
+     * run and the bundle looked identical to one where validation had rejected it.
+     */
+    @Test fun `parse json records both the balloon and the panel`() = runTest {
+        val dir = temp.newFolder("panel-parse")
+        val parsed = ParsedPage(
+            listOf(
+                SpeechUnit(
+                    index = 0,
+                    speaker = "Robot",
+                    text = "HI",
+                    bounds = BoundingBox(0.1f, 0.2f, 0.3f, 0.4f),
+                    panel = BoundingBox(0f, 0.1f, 1f, 0.6f),
+                ),
+            ),
+        )
+
+        writer(dir).record(pageImage(), rawResponse = "{}", parsed = parsed)
+
+        val json = File(dir.listFiles()!!.first(), "parse.json").readText()
+        assertTrue("the balloon must be recorded: " + json, json.contains("\"bounds\": {"))
+        assertTrue("the panel must be recorded too: " + json, json.contains("\"panel\": {"))
+        assertTrue("the panel's own numbers must appear: " + json, json.contains("0.6"))
     }
 }

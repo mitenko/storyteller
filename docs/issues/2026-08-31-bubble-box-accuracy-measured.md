@@ -955,3 +955,44 @@ Speaker attribution drifted between calls on this page (`Rabbit` in one run,
 `Narrator` in another for the same unit). That is unrelated to panels and does not
 affect this result, but it is a reminder that the model is not deterministic across
 calls, and any future single-run comparison should account for it.
+
+
+---
+
+## 20. Panels on device, on an unseen page
+
+Bundle `page-1788370633603`, 2026-09-02. A page never used in any measurement here,
+read through the app's own path rather than an offline harness. `parseVersion: 7`,
+`claude-sonnet-5`, upload 911x1316.
+
+**5 units, all 5 with a balloon and a panel, resolving to 4 distinct panels:**
+
+| panel | units | content |
+|---|---|---|
+| 18,15 460,636 | 0, 1 | robot kneeling with the dragon — two balloons, identical panel box |
+| 473,15 893,315 | 2 | dragon from behind |
+| 473,325 893,636 | 3 | dragon close-up |
+| 18,650 893,978 | 4 | wide beach band, three characters |
+
+Visual inspection: every panel sits on the drawn border, every balloon is inside
+its panel, and the page's fifth panel — the hut, which carries no dialogue —
+correctly has no unit referencing it. The stability property holds again: units 0
+and 1 share a panel and received a byte-identical box.
+
+The timeout fix held. No `error.txt`, where the two preceding scans on this device
+both failed with `SocketTimeoutException`.
+
+### 20.1 A defect this bundle exposed
+
+`parse.json` contained no `panel`, while `response.json` did. The cause was not
+validation: `DiagnosticWriter.parseJson` hand-writes its output field by field and
+had never been taught the new field.
+
+This is the same silent-drop class as `toSpeechUnits`, which section 19's work had
+guarded with a test — and it was missed on a *second* hand-written copier in a
+different file. It matters more than a cosmetic gap, because the diagnostic is the
+only way to tell, from a pulled bundle, whether a panel was rejected by validation
+or never recorded. Those two look identical, and one of them is a bug.
+
+Fixed, with the two boxes now pinned by `DiagnosticWriterImplTest`, and the
+function's KDoc says plainly that it is a place fields go to be forgotten.
