@@ -693,3 +693,105 @@ sparse page and a multi-panel layout, per the plan's Task 4 Step 5.
 character, which PowerShell emits unescaped and the JSON decoder rejects. Now
 parsed with `strict=False`: the word's text barely matters, its box is what is
 being measured, and failing an entire measurement over one stray byte was wrong.
+
+
+---
+
+## 17. Two new pages, and what they refute
+
+Bundles `page-1788294930134` (dense, 10 units) and `page-1788295071078` (sparse,
+6 units), 2026-09-02, on the shipped 1568-token Sonnet 5 configuration.
+
+**Neither page is measurable.** OCR read **0 words** on the dense page and 12
+heavily corrupted words on the sparse one (`'cquNq!.'`, `'youQE'`, `'OLDEQ'`,
+`'EXETLY'`, `'SPPJNG'`). Zero of 16 units scored across both.
+
+That is a limitation of the measuring instrument, not a finding about the app. The
+transcription on both pages is visibly good: "SPOILED YOUR LUNCH, BARBARIANS!",
+sound effects isolated as `PAF!` / `FOOMP!` / `WHIRRRRR` and attributed to
+Narrator, characters named as Cogsley, Rabbit, Robot, Old Man.
+
+### 17.1 This refutes the OCR-localisation direction
+
+Section 6.1 and section 11 propose giving bubble localisation to OCR. Section 13.4
+flagged that as unproven. It is now **refuted**: on these two pages an OCR
+localiser would have produced nothing at all — no words, no boxes, no crops. A
+mechanism that returns nothing on two of three real pages cannot be the one the
+reader depends on.
+
+Section 6.1's supporting claims need three corrections, recorded here rather than
+edited away:
+
+- *"OCR is ... strong at where words sit on the page"* — not on stylised comic
+  lettering. 0 words on one page, 12 corrupted on another, ~60% coverage on the
+  best case.
+- *"paying a 3x premium"* — that premium was removed in commit 35674e4. The
+  shipped configuration spends 1568 visual tokens, the same as the original Haiku
+  4.5 app.
+- *"a higher-resolution model whose boxes still fail the 0.5 IoU threshold"* —
+  overtaken by section 16: the shipped configuration passes at 0.559, and the
+  higher-resolution variant was dropped because it was *worse*, not because it
+  failed.
+
+The `PageLocalizer` seam committed in a58ace6 is harmless — it defaults to
+`NoOpPageLocalizer` — but it should not be wired up on this evidence.
+
+### 17.2 A better idea, tested: snap the model's box to the balloon
+
+The model's boxes are well **centred** (dx +0.014, dy -0.008) and roughly the
+right **size** (1.86x the text). What they are not is *aligned to the balloon*. So
+use the box as a seed rather than as an answer: flood-fill the balloon's white
+interior outward from inside the box, and take the filled region's extent. A
+speech balloon is paper-white inside a dark outline, which is exactly the kind of
+boundary a fill stops at.
+
+Tested on all four Sonnet 5 bundles, 33 boxed units, scored with the committed
+harness:
+
+| outcome | units | share |
+|---|---|---|
+| snapped cleanly | 25 | **76%** |
+| rejected (fill collapsed or escaped) | 4 | 12% |
+| merged with an adjacent balloon | 4 | 12% |
+
+**On every unit that snapped cleanly and could be scored, containment went from
+0.887 to 1.000.** Not "improved" — the balloon's text ends up entirely inside the
+box, on all ten such units.
+
+The decisive part: **it worked on the dense page where OCR read zero words**, 8 of
+10 units. It operates on pixels next to a known-good seed, so it does not need to
+read anything. That is precisely the failure mode that kills the OCR approach.
+
+### 17.3 Why this is safe to build
+
+Each failure mode is detectable before the box is used, and the fallback is the
+box we already ship today:
+
+- **collapse** — the filled region is a tiny fraction of the seed box. Detected by
+  an area floor; multi-seed sampling (take the largest region found in the box)
+  already fixed every collapse on one page, including a unit that had returned
+  0.008 containment.
+- **escape** — the fill grows past a multiple of the seed area, meaning it leaked
+  through a gap in the outline into the page background. Detected by an area cap.
+- **merge** — two units snap to nearly the same region, so two adjacent balloons
+  filled as one. Detected by comparing snapped boxes pairwise: IoU above ~0.8
+  between two units means reject both.
+
+Every detected failure keeps the model's original box. So the method is
+**monotonic**: 76% of units get a perfect crop, the remaining 24% get exactly what
+they get today, and no unit gets worse. That is a different risk profile from
+every other option considered in this document, all of which replaced a working
+mechanism with an unproven one.
+
+### 17.4 What it does not do
+
+It does not find comic **panel** edges, which was the other half of the question.
+Panels are bounded by gutters, and a fill seeded inside a balloon stops at the
+balloon's own outline long before reaching them. Panel detection would be a
+separate mechanism — and it is not obviously needed: the reader crops a *bubble*,
+not a panel.
+
+It is also 33 units on four pages of one book, with one art style. The fill
+thresholds (luma >= 165, saturation <= 60) are tuned to white paper balloons and
+would need revisiting for a book that uses coloured or textured balloons, or
+black balloons with white lettering.
