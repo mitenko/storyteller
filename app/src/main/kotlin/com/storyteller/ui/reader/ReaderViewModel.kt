@@ -220,7 +220,7 @@ class ReaderViewModel @Inject constructor(
         current = current.coerceIn(0, (all.size - 1).coerceAtLeast(0))
         val readyIndices = ready.mapTo(mutableSetOf()) { it.unit.index }
         return ReaderUiState.Playing(
-            lines = all.map { u ->
+            panels = all.map { u ->
                 ReaderUiState.Line(
                     index = u.index,
                     speaker = u.speaker,
@@ -232,7 +232,7 @@ class ReaderViewModel @Inject constructor(
                     // which lost Auto's only progress indication (F7).
                     audioReady = u.index in readyIndices,
                 )
-            },
+            }.groupByPanel(),
             current = current,
             image = image,
             playback = playback,

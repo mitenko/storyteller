@@ -16,7 +16,8 @@ sealed interface ReaderUiState {
      * and left a successful read with no ending on screen.
      */
     data class Playing(
-        val lines: List<Line>,
+        /** The page's panels in reading order, each with the lines spoken in it. */
+        val panels: List<PanelGroup>,
         /** Which unit is on screen - the reader shows one bubble at a time. */
         val current: Int,
         /** The page [lines] were read from; what [Bubble] crops a speech-bubble region out of. */
@@ -32,7 +33,17 @@ sealed interface ReaderUiState {
          * `sounding` marker exists to show.
          */
         val playingIndex: Int?,
-    ) : ReaderUiState
+    ) : ReaderUiState {
+        /**
+         * Every line on the page, in reading order.
+         *
+         * Derived rather than stored. It keeps the ten existing `state.lines` call
+         * sites working, and it makes "grouping loses no line" true by
+         * construction: there is no second copy that can drift from the first.
+         * At most ten elements, so the flatMap costs nothing.
+         */
+        val lines: List<Line> get() = panels.flatMap { it.lines }
+    }
     data class Error(val message: String, val canRetry: Boolean) : ReaderUiState
 
     data class Line(

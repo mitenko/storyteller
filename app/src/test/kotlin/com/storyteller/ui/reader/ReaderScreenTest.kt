@@ -49,7 +49,7 @@ class ReaderScreenTest {
         playback: PlaybackState = PlaybackState.Playing(0),
         current: Int = 0,
         mode: ReadingMode = ReadingMode.Auto,
-    ) = ReaderUiState.Playing(lines, current, image = null, playback, mode, playingIndex = null)
+    ) = ReaderUiState.Playing(panels = lines.groupByPanel(), current, image = null, playback, mode, playingIndex = null)
 
     @Test fun `the reader is framed with a titled bar`() {
         compose.setContent {
@@ -147,7 +147,7 @@ class ReaderScreenTest {
         compose.setContent {
             ReaderContent(
                 ReaderUiState.Playing(
-                    lines = listOf(line("Wolf", "Get away!")),
+                    panels = listOf(line("Wolf", "Get away!")).groupByPanel(),
                     current = 0,
                     image = null,
                     playback = PlaybackState.Finished,
@@ -407,7 +407,7 @@ class ReaderScreenTest {
         compose.setContent {
             ReaderContent(
                 ReaderUiState.Playing(
-                    lines = listOf(line("Wolf", "Get away!")),
+                    panels = listOf(line("Wolf", "Get away!")).groupByPanel(),
                     current = 0,
                     image = null,
                     playback = PlaybackState.Playing(0),
@@ -432,7 +432,7 @@ class ReaderScreenTest {
         compose.setContent {
             ReaderContent(
                 ReaderUiState.Playing(
-                    lines = listOf(line("Wolf", "Get away!", index = 0), line("Bear", "Roar", index = 1)),
+                    panels = listOf(line("Wolf", "Get away!", index = 0), line("Bear", "Roar", index = 1)).groupByPanel(),
                     current = 1,
                     image = null,
                     playback = PlaybackState.Playing(0),

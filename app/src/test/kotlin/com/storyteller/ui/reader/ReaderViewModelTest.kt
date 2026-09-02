@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import com.storyteller.domain.ReadingPipeline
 import com.storyteller.domain.pageImage
+import com.storyteller.domain.speechUnit
 import com.storyteller.domain.model.BoundingBox
 import com.storyteller.domain.model.FailureReason
 import com.storyteller.domain.model.PageImage
@@ -25,6 +26,7 @@ import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
@@ -176,6 +178,15 @@ class ReaderViewModelTest {
         player: PagePlayer,
         mode: ReadingMode = ReadingMode.Auto,
     ): ReaderViewModel = ReaderViewModel(pipeline, player, FakeSettingsRepository(mode))
+
+    /** Drives the shared [pipeline] straight to Ready with [units] and reads back the resulting Playing state. */
+    private suspend fun TestScope.playingStateFor(units: List<SpeechUnit>): ReaderUiState.Playing {
+        val vm = readerViewModel(RecordingPlayer())
+        val prepared = units.map { PreparedUnit(unit = it, voiceId = "v", audio = File("/tmp/${it.index}.mp3")) }
+        pipeline.emit(PipelineState.Ready(prepared, image = null))
+        advanceUntilIdle()
+        return vm.uiState.value as ReaderUiState.Playing
+    }
 
     @Test fun `maps pipeline states to reader states`() = runTest(dispatcher) {
         val pipeline = FakePipeline()
@@ -706,4 +717,24 @@ class ReaderViewModelTest {
     }
 
     private fun current(vm: ReaderViewModel) = (vm.uiState.value as ReaderUiState.Playing).current
+
+    // --- Panel groups in the reader state (Task 2) -----------------------------
+
+    @Test fun `the reader state groups lines by their panel`() = runTest {
+        // Two units in one panel, a third in another: two groups, and the flat
+        // line list still holds all three in order.
+        val panelA = BoundingBox(0f, 0f, 1f, 0.5f)
+        val panelB = BoundingBox(0f, 0.5f, 1f, 1f)
+        val units = listOf(
+            speechUnit(0).copy(panel = panelA),
+            speechUnit(1).copy(panel = panelA),
+            speechUnit(2).copy(panel = panelB),
+        )
+
+        val state = playingStateFor(units)
+
+        assertEquals(2, state.panels.size)
+        assertEquals(listOf(0, 1), state.panels[0].lines.map { it.index })
+        assertEquals(listOf(0, 1, 2), state.lines.map { it.index })
+    }
 }
