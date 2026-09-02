@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -183,6 +184,15 @@ internal fun contentAlphaFor(audioReady: Boolean): Float = if (audioReady) 1f el
 internal const val PANEL_MAX_HEIGHT_FRACTION = 0.5f
 
 /**
+ * Test-only handle for counting cards. A card's only always-present, always-
+ * unique-per-card content is its lines' own text, which a caller has no way to
+ * count generically; the panel image, the one candidate semantic (content-
+ * Description = "Comic panel"), only exists when a crop actually decodes. This
+ * tag exists purely so a test can assert "N cards" without depending on either.
+ */
+internal const val PANEL_CARD_TEST_TAG = "panel_card"
+
+/**
  * One panel and the lines spoken in it.
  *
  * The picture is decoded once per CARD, not once per line, so two lines sharing a
@@ -191,6 +201,14 @@ internal const val PANEL_MAX_HEIGHT_FRACTION = 0.5f
  * Keyed on the group's panel and first line so a re-parse that changes which panel
  * a line belongs to produces a fresh decode; keying on the line index alone would
  * keep a stale picture.
+ *
+ * `first.bounds` is ALSO in the key list even though the render call below
+ * passes `first.bounds` only as a fallback source: `cropBubble` itself falls
+ * back to `bounds` whenever `panel` is null (see BubbleCrop.kt), so a group
+ * with no panel is keyed on its bounds by that fallback alone. Without
+ * `first.bounds` here, a re-parse that changes a null-panel line's bounds
+ * while its index and (null) panel stay the same would key identically and
+ * keep the stale crop.
  */
 @Composable
 internal fun PanelCard(
@@ -201,13 +219,16 @@ internal fun PanelCard(
     modifier: Modifier = Modifier,
 ) {
     val first = group.lines.first()
-    val bitmap by produceState<ImageBitmap?>(null, group.panel, first.index, image) {
+    val bitmap by produceState<ImageBitmap?>(null, group.panel, first.index, first.bounds, image) {
         value = image?.let { page ->
             withContext(Dispatchers.Default) { cropBubble(page, first.bounds, group.panel) }
         }?.asImageBitmap()
     }
 
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(
+        modifier.fillMaxWidth().testTag(PANEL_CARD_TEST_TAG),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         // Fitted and height-capped, never cropped to fill: a crop would discard
         // the art this whole feature exists to show, and the cap is what keeps the
         // picture and its lines on screen together.

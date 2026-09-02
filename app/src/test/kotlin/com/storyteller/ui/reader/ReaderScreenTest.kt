@@ -1,5 +1,6 @@
 package com.storyteller.ui.reader
 
+import android.graphics.Bitmap
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -7,12 +8,15 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.storyteller.domain.model.BoundingBox
+import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.PlaybackState
 import com.storyteller.domain.model.ReadingMode
+import java.io.ByteArrayOutputStream
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -200,10 +204,51 @@ class ReaderScreenTest {
             )
         }
 
+        // Two panels (A, A, B), not three: the structural claim this test is named for.
+        compose.onAllNodesWithTag(PANEL_CARD_TEST_TAG).assertCountEquals(2)
         // All three lines are on screen at once, which the paged reader could not do.
         compose.onNodeWithText("first").assertExists()
         compose.onNodeWithText("second").assertExists()
         compose.onNodeWithText("third").assertExists()
+    }
+
+    /**
+     * The money-shot path: `PanelCard`'s `produceState` -> `cropBubble` ->
+     * `asImageBitmap` -> `Image` wiring, with a real, Robolectric-compressed
+     * `PageImage` and a non-null panel box - every other test in this file
+     * passes `image = null`, so without this one nothing above `cropBubble`'s
+     * own unit tests proves the decoded picture actually reaches the screen.
+     * `playing()` hardcodes `image = null`, so this builds the `Playing`
+     * state directly instead. The image renders with contentDescription
+     * "Comic panel" (not the line's text, which is `LineText`'s own node).
+     */
+    @Test fun `a group with a real image renders the decoded panel`() {
+        val bmp = Bitmap.createBitmap(800, 600, Bitmap.Config.ARGB_8888)
+        val bytes = ByteArrayOutputStream().also { bmp.compress(Bitmap.CompressFormat.JPEG, 90, it) }.toByteArray()
+        val image = PageImage(bytes, "image/jpeg")
+        val panel = BoundingBox(0.1f, 0.1f, 0.9f, 0.9f)
+
+        compose.setContent {
+            ReaderContent(
+                state = ReaderUiState.Playing(
+                    panels = listOf(line("Bear", "Hello there", panel = panel)).groupByPanel(),
+                    current = 0,
+                    image = image,
+                    playback = PlaybackState.Playing(0),
+                    mode = ReadingMode.Auto,
+                    playingIndex = null,
+                ),
+                onRetry = {}, onBack = {},
+            )
+        }
+
+        // The crop decodes off the composition thread; give the produceState
+        // coroutine a chance to land before asserting.
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodesWithContentDescription("Comic panel").fetchSemanticsNodes().isNotEmpty()
+        }
+
+        compose.onNodeWithContentDescription("Comic panel").assertIsDisplayed()
     }
 
     @Test fun `tapping a line reports that line's index`() {
@@ -277,6 +322,18 @@ class ReaderScreenTest {
             "a not-ready line must not be fully transparent - it should read as waiting, not absent",
             contentAlphaFor(audioReady = false) > 0f,
         )
+    }
+
+    /**
+     * A lighter integration check than the pure-function assertion above can
+     * give: a not-ready line still renders and shows its own text - it is
+     * dimmed (contentAlphaFor, above), not hidden.
+     */
+    @Test fun `a not-ready line still shows its content, just dimmed`() {
+        compose.setContent {
+            ReaderContent(playing(listOf(line("Robot", "waiting", audioReady = false))), onRetry = {}, onBack = {})
+        }
+        compose.onNodeWithText("waiting").assertIsDisplayed()
     }
 
     // --- I5: the "sounding" marker -----------------------------------------
