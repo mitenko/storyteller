@@ -177,6 +177,28 @@ So the two jobs should be taken by two mechanisms:
 This reverses a documented decision and is a design change, not a bug fix. It is
 recorded here for that decision to be taken deliberately.
 
+## 6.1 Current implementation choice: OCR-localisation split
+
+The current version of the app implements the cheaper architecture justified by the
+latest diagnostics. The model remains responsible for speech transcription,
+reading order and speaker attribution; OCR is responsible for the bubble extent.
+The two outputs are aligned by text matching, and a unit only gets a crop when the
+OCR match is sufficiently confident.
+
+This is the trade-off the evidence supports:
+
+- The vision call is strong at text and ordering, but not at fine-grained box
+  placement.
+- OCR is weak at semantic attribution but strong at where words sit on the page.
+- Combining them is cheaper than paying a 3x premium for a higher-resolution model
+  whose boxes still fail the 0.5 IoU threshold.
+
+The implementation keeps the model's raw response available in diagnostics and
+uses the OCR-localisation layer as a best-effort repair step rather than as a
+replacement for the model transcript. Units with poor OCR coverage keep their
+model bounds, and if those are absent or invalid the reader falls back to
+text-only rendering instead of cropping a wrong region.
+
 ## 7. Immediate, independent of that decision
 
 1. **Crop to the page before upload.** Removes the desk and facing page, and cuts

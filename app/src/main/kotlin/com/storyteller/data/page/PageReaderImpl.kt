@@ -12,6 +12,8 @@ import com.storyteller.domain.model.ParsedPage
 import com.storyteller.domain.model.PAGE_VISION_MODEL
 import com.storyteller.domain.model.ParsedUnit
 import com.storyteller.domain.model.toSpeechUnits
+import com.storyteller.domain.ocr.NoOpPageLocalizer
+import com.storyteller.domain.ocr.PageLocalizer
 import com.storyteller.domain.repository.PageReader
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
@@ -41,6 +43,7 @@ class PageReaderImpl(
     private val parsedPageDao: ParsedPageDao,
     private val json: Json,
     private val diagnostics: DiagnosticWriter,
+    private val localizer: PageLocalizer = NoOpPageLocalizer,
 ) : PageReader {
 
     // Deliberately NOT runCatching: it catches Throwable unconditionally and does
@@ -77,7 +80,9 @@ class PageReaderImpl(
         val hash = sha256(image.bytes + PAGE_VISION_MODEL.id.toByteArray())
 
         parsedPageDao.findCurrent(hash, PARSE_VERSION)?.let { cached ->
-            return json.decodeFromString<PageDto>(cached.unitsJson).toDomain(image.width, image.height)
+            return json.decodeFromString<PageDto>(cached.unitsJson)
+                .toDomain(image.width, image.height)
+                .applyLocalizer(localizer, image)
         }
 
         val response = try {
@@ -110,7 +115,7 @@ class PageReaderImpl(
         parsedPageDao.upsert(
             ParsedPageEntity(hash, json.encodeToString(page), System.currentTimeMillis(), parseVersion = PARSE_VERSION),
         )
-        val parsed = page.toDomain(image.width, image.height)
+        val parsed = page.toDomain(image.width, image.height).applyLocalizer(localizer, image)
 
         // Recorded here and not on the cache path above: a hit makes no call, so
         // there is no response to record. `payload` is passed UNTOUCHED so the
@@ -200,4 +205,7 @@ class PageReaderImpl(
             ParsedUnit(speaker = u.speaker, text = u.text, bounds = u.bounds?.toDomain(width, height))
         }.toSpeechUnits(),
     )
+
+    private fun ParsedPage.applyLocalizer(localizer: PageLocalizer, image: PageImage): ParsedPage =
+        ParsedPage(units = localizer.localize(image, units))
 }

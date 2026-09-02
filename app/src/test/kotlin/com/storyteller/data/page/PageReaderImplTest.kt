@@ -11,6 +11,8 @@ import com.storyteller.data.sha256
 import com.storyteller.domain.model.PAGE_VISION_MODEL
 import com.storyteller.domain.model.ParsedPage
 import com.storyteller.domain.model.PageImage
+import com.storyteller.domain.ocr.OcrWord
+import com.storyteller.domain.ocr.TranscriptOcrLocalizer
 import com.storyteller.domain.pageImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancelAndJoin
@@ -496,5 +498,34 @@ class PageReaderImplTest {
 
         val page = reader().read(img).getOrThrow()
         assertEquals("Fresh", page.units[0].speaker)
+    }
+
+    @Test fun `ocr transcript alignment accepts a confident unit and rejects weak matches`() {
+        val units = listOf(
+            com.storyteller.domain.model.ParsedUnit("Duncan", "THEY KNOW SIR", null),
+            com.storyteller.domain.model.ParsedUnit("Aly", "BECAUSE WE NEED HELP", null),
+        )
+        val words = listOf(
+            OcrWord("THEY", 50f, 100f, 100f, 120f),
+            OcrWord("KNOW", 110f, 100f, 160f, 120f),
+            OcrWord("SIR", 180f, 100f, 220f, 120f),
+            OcrWord("BECAUSE", 50f, 300f, 130f, 330f),
+            OcrWord("WE", 140f, 300f, 170f, 330f),
+            OcrWord("NEED", 180f, 300f, 230f, 330f),
+            OcrWord("HELP", 240f, 300f, 290f, 330f),
+        )
+
+        val localizer = TranscriptOcrLocalizer(words)
+        val localized = localizer.localize(
+            pageImage(),
+            units.mapIndexed { index, unit ->
+                com.storyteller.domain.model.SpeechUnit(index, unit.speaker, unit.text, unit.bounds)
+            },
+        )
+
+        assertEquals(2, localized.size)
+        assertNotNull(localized[0].bounds)
+        assertNotNull(localized[1].bounds)
+        assertTrue(localized[0].bounds!!.top < localized[1].bounds!!.top)
     }
 }
