@@ -886,3 +886,72 @@ measured rather than argued.
 
 Three pages of one book, one art style. A page with overlapping, circular, or
 borderless panels has not been tried.
+
+
+---
+
+## 19. The panels measured against hand-labelled ground truth: PASS
+
+§18.4 recorded the panel result as **unmeasured** — resting on structural
+consistency and visual inspection, which is the standard this document has
+criticised elsewhere. It is now measured.
+
+**Ground truth:** `scripts/fixtures/panels-page-1788294930134.json`. Five panels
+labelled by hand off a 100px coordinate grid rendered over the upload copy. The
+page was chosen because **OCR read zero words on it** — no automated method can
+produce ground truth there, which is exactly why it needed hand labels.
+
+**Tool:** `scripts/measure_panels.py`. Its `--live` mode reads the schema and
+prompt out of `PageSchema.kt` rather than restating them, so the measurement
+cannot drift from what the app actually sends.
+
+| unit | model panel | labelled panel | IoU |
+|---|---|---|---|
+| 0 | 0,0 840,322 | 0,0 840,305 | 0.947 |
+| 1-3 | 0,330 840,636 | 0,325 840,620 | 0.932 |
+| 4-5 | 0,645 420,1010 | 0,640 420,1000 | 0.959 |
+| 6-7 | 420,645 840,1010 | 432,640 840,1000 | 0.932 |
+| 8-9 | 0,1020 840,1411 | 0,1012 840,1411 | 0.980 |
+
+**Mean IoU 0.949 against a stop condition of 0.70. Zero units in the wrong panel,
+zero units without a panel.**
+
+Two further results:
+
+- **Stability confirmed by measurement, not assertion.** §18 observed that units
+  sharing a panel receive identical boxes. The tool checks it: every one of the
+  five groups returned a byte-identical rectangle. This is the property that makes
+  consecutive lines render as one steady picture instead of a jittering crop.
+- **The edges are tight.** Disagreements are 5-20 px on a 1411 px page, which is
+  inside the slant tolerance: the page is a photograph of a curved book, so its
+  gutters are not axis-aligned and neither the labels nor the model's output can be
+  exact. Roughly 0.95 is the practical ceiling here, and the result is at it.
+
+### 19.1 Task 4 is closed unbuilt
+
+The iteration-5 plan gated pixel-based edge snapping on this measurement, with
+three outcomes. The result is the first: **passes with tight edges — do not build
+pixel refinement.**
+
+There is nothing for a region-grower to fix. A 5-20 px disagreement against labels
+that are themselves approximations of a slanted boundary is not an error signal, it
+is the measurement floor. Building `PanelSnap.kt` would have added a pixel
+algorithm, a synthetic test suite and a rejection heuristic to chase noise.
+
+This also closes the question the expansion research asked. Expanding outward from
+a balloon to the panel edges is *possible* — §17.2 measured containment going 0.887
+to 1.000 on 76% of units by flood fill — but it is **unnecessary**, because the
+model resolves the panel directly at IoU 0.949 for no extra request and no extra
+image. The cheapest mechanism was again the best one, which is now the third time
+in this investigation.
+
+### 19.2 What is still not established
+
+One page. The labels are mine, drawn from the same image the model saw, and a
+second labeller might place the gutters a few pixels differently — though not
+enough to move 0.949 below 0.70.
+
+Speaker attribution drifted between calls on this page (`Rabbit` in one run,
+`Narrator` in another for the same unit). That is unrelated to panels and does not
+affect this result, but it is a reminder that the model is not deterministic across
+calls, and any future single-run comparison should account for it.
