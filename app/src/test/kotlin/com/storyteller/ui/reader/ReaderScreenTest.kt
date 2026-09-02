@@ -35,8 +35,14 @@ class ReaderScreenTest {
      * These fixtures fill the fields Task 7 added (bounds, current, image) with
      * neutral defaults so most tests need not think about them.
      */
-    private fun line(speaker: String, text: String, index: Int = 0, bounds: BoundingBox? = null, audioReady: Boolean = true) =
-        ReaderUiState.Line(index, speaker, text, bounds, audioReady)
+    private fun line(
+        speaker: String,
+        text: String,
+        index: Int = 0,
+        bounds: BoundingBox? = null,
+        audioReady: Boolean = true,
+        panel: BoundingBox? = null,
+    ) = ReaderUiState.Line(index, speaker, text, bounds, audioReady, panel)
 
     private fun playing(
         lines: List<ReaderUiState.Line>,

@@ -23,6 +23,44 @@ class BubbleCropTest {
         return PageImage(out.toByteArray(), "image/jpeg")
     }
 
+    @Test fun `crops to the panel when one is present`() {
+        val balloon = BoundingBox(0.40f, 0.40f, 0.50f, 0.50f)
+        val panel = BoundingBox(0.00f, 0.25f, 1.00f, 0.60f)
+
+        val panelCrop = cropBubble(page(), balloon, panel)!!
+        val balloonCrop = cropBubble(page(), balloon, null)!!
+
+        // The panel is a full-width band; the balloon is a small square inside it.
+        // An implementation that quietly kept cropping the balloon fails here.
+        assertTrue(
+            "panel crop ${panelCrop.width}x${panelCrop.height} should be wider than " +
+                "balloon crop ${balloonCrop.width}x${balloonCrop.height}",
+            panelCrop.width > balloonCrop.width,
+        )
+    }
+
+    @Test fun `falls back to the balloon when no panel was returned`() {
+        assertNotNull(cropBubble(page(), BoundingBox(0.40f, 0.40f, 0.50f, 0.50f), null))
+    }
+
+    @Test fun `falls back to text when neither is present`() {
+        assertNull(cropBubble(page(), null, null))
+    }
+
+    /**
+     * A panel is already the framed picture. Padding it pulls in the neighbouring
+     * panel's art, which is the exact failure the expansion research warns about,
+     * so the panel path pads by zero where the balloon path pads by BUBBLE_PAD.
+     */
+    @Test fun `a panel crop is not padded outward`() {
+        // Full page width: any outward padding would have to be clamped, so the
+        // observable difference is on the vertical edges.
+        val panel = BoundingBox(0.00f, 0.25f, 1.00f, 0.50f)
+        val crop = cropBubble(page(), null, panel)!!
+        // 0.25 of 600 = 150 rows exactly, with no padding added.
+        assertEquals(150, crop.height)
+    }
+
     @Test fun `crops the region a bubble occupies`() {
         val bitmap = cropBubble(page(), BoundingBox(0.25f, 0.25f, 0.75f, 0.75f))
 

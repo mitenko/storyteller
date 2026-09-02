@@ -235,9 +235,12 @@ internal fun Bubble(
     sounding: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
-    val bitmap by produceState<ImageBitmap?>(null, line.index, image) {
+    // Keyed on the boxes themselves, not only line.index: a re-parse can change
+    // which panel a line resolves to without changing its index, and the stale
+    // crop would survive.
+    val bitmap by produceState<ImageBitmap?>(null, line.index, line.bounds, line.panel, image) {
         value = image?.let { pageImage ->
-            withContext(Dispatchers.Default) { cropBubble(pageImage, line.bounds) }
+            withContext(Dispatchers.Default) { cropBubble(pageImage, line.bounds, line.panel) }
         }?.asImageBitmap()
     }
     Column(

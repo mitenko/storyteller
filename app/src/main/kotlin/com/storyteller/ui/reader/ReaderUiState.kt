@@ -49,5 +49,14 @@ sealed interface ReaderUiState {
          * synthesis-progress indication.
          */
         val audioReady: Boolean,
+        /**
+         * The comic panel this line was spoken in, or null when none was resolved.
+         * Preferred over [bounds] for rendering: it shows the picture rather than a
+         * crop of lettering the child cannot read.
+         *
+         * Last in the list, and optional, so the existing positional construction
+         * in the screen tests keeps compiling.
+         */
+        val panel: BoundingBox? = null,
     )
 }

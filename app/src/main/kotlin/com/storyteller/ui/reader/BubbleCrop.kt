@@ -24,8 +24,16 @@ private const val BUBBLE_PAD = 0.04f
 private const val TARGET_LONG_EDGE = 1440
 
 /**
- * The bubble [bounds] encloses, decoded directly out of the page's
+ * The picture to show for one line, decoded directly out of the page's
  * full-resolution copy at display scale.
+ *
+ * Prefers [panel] over [bounds]. A balloon crop shows a child the lettering they
+ * cannot read; the panel shows them the picture the line was spoken in. The
+ * balloon remains the fallback for a unit whose panel could not be resolved, and
+ * a unit with neither returns null so the reader renders its text.
+ *
+ * A panel is padded by nothing. It is already the framed picture, and padding it
+ * outward pulls in the neighbouring panel's art.
  *
  * Uses [BitmapRegionDecoder] rather than [BitmapFactory.decodeByteArray]: the
  * latter would materialise the ENTIRE page as ARGB_8888 just to crop a sliver
@@ -41,8 +49,9 @@ private const val TARGET_LONG_EDGE = 1440
  * the unit's text, and a bubble that cannot be produced must reach that path
  * rather than an error screen.
  */
-fun cropBubble(image: PageImage, bounds: BoundingBox?): Bitmap? {
-    if (bounds == null) return null
+fun cropBubble(image: PageImage, bounds: BoundingBox?, panel: BoundingBox? = null): Bitmap? {
+    val source = panel ?: bounds ?: return null
+    val padFraction = if (panel != null) 0f else BUBBLE_PAD
     var decoder: BitmapRegionDecoder? = null
     return try {
         // The 4-arg overload works from minSdk 26 onward; `isShareable = false`
@@ -50,13 +59,13 @@ fun cropBubble(image: PageImage, bounds: BoundingBox?): Bitmap? {
         @Suppress("DEPRECATION")
         decoder = BitmapRegionDecoder.newInstance(image.displayBytes, 0, image.displayBytes.size, false)
             ?: return null
-        val rect = cropRect(bounds, decoder.width, decoder.height, padFraction = BUBBLE_PAD)
+        val rect = cropRect(source, decoder.width, decoder.height, padFraction = padFraction)
             ?: return null
         val sampleSize = sampleSizeFor(rect.width, rect.height, TARGET_LONG_EDGE)
         val region = Rect(rect.left, rect.top, rect.left + rect.width, rect.top + rect.height)
         decoder.decodeRegion(region, BitmapFactory.Options().apply { inSampleSize = sampleSize })
     } catch (e: Throwable) {
-        Log.w(TAG, "could not crop a bubble; the reader will show its text", e)
+        Log.w(TAG, "could not crop a panel or bubble; the reader will show its text", e)
         null
     } finally {
         // The decoder holds native memory scaled to the PAGE's dimensions (it
