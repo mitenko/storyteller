@@ -65,7 +65,7 @@ class ReaderViewModel @Inject constructor(
     /** The row currently sounding in Tap mode, or null. Cleared on a fresh page and on Finished. */
     private var playingIndex: Int? = null
 
-    /** Whatever units are synthesized so far for the current page; what onBubbleTapped may play. */
+    /** Whatever units are synthesized so far for the current page; what onLineTapped may play. */
     private var lastReady: List<PreparedUnit> = emptyList()
 
     /** Which unit is on screen. Bounded at both ends in [playingState] and [onLineTapped]; reset alongside [queued]. */
@@ -118,8 +118,8 @@ class ReaderViewModel @Inject constructor(
                     // Auto is the ONLY mode that may trust the player's position -
                     // Tap plays a one-item playlist and always reports position 0,
                     // so taking it here would move the highlight to line 0 on every
-                    // tap; onBubbleTapped/onLineTapped already recorded the real
-                    // index and must win.
+                    // tap; onLineTapped already recorded the real index and must
+                    // win.
                     //
                     // Mapped, not copied: an Auto-mode tap (onLineTapped) REPLACES
                     // the playlist starting at the tapped unit, so position 0 is
@@ -299,21 +299,6 @@ class ReaderViewModel @Inject constructor(
         queued = lastReady.size
 
         _uiState.value = state.copy(current = bounded, playingIndex = bounded)
-    }
-
-    /**
-     * Plays whichever unit is on screen. A one-unit playlist plus an immediate
-     * endOfPage(): the player needs no new API for tap mode, and a tap while
-     * something plays REPLACES it, which is what a child tapping the bubble
-     * means.
-     */
-    fun onBubbleTapped() {
-        if (mode != ReadingMode.Tap) return
-        val prepared = lastReady.firstOrNull { it.unit.index == current } ?: return
-        playingIndex = current
-        player.play(listOf(prepared))
-        player.endOfPage()
-        (_uiState.value as? ReaderUiState.Playing)?.let { _uiState.value = it.copy(playingIndex = current) }
     }
 
     fun onRetry() {

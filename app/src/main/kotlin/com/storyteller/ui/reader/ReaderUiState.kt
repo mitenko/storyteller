@@ -18,9 +18,9 @@ sealed interface ReaderUiState {
     data class Playing(
         /** The page's panels in reading order, each with the lines spoken in it. */
         val panels: List<PanelGroup>,
-        /** Which unit is on screen - the reader shows one bubble at a time. */
+        /** Which unit was on screen at the last player transition; retained for the ViewModel's own bookkeeping. The screen itself no longer indexes by it - it shows every line on the page at once. */
         val current: Int,
-        /** The page [lines] were read from; what [Bubble] crops a speech-bubble region out of. */
+        /** The page [lines] were read from; what [PanelCard] crops a panel or speech-bubble region out of. */
         val image: PageImage?,
         val playback: PlaybackState,
         val mode: ReadingMode,
@@ -28,8 +28,8 @@ sealed interface ReaderUiState {
          * The unit currently sounding, or null. Tap mode knows it because it
          * handled the tap; Auto mode takes it from the player's own playlist
          * position. Usually equal to [current] - it diverges only when a child
-         * has tapped a bubble and then navigated away with the arrows while its
-         * audio is still playing, which is exactly the case [Bubble]'s
+         * has tapped a line and the story has moved on past it while its
+         * audio is still playing, which is exactly the case [LineRow]'s
          * `sounding` marker exists to show.
          */
         val playingIndex: Int?,
@@ -53,7 +53,7 @@ sealed interface ReaderUiState {
         /** The unit's speech-bubble box, or null when the model could not locate one. */
         val bounds: BoundingBox?,
         /**
-         * False until this line's audio has been synthesized - drives [Bubble]'s
+         * False until this line's audio has been synthesized - drives [LineRow]'s
          * greyed-out rendering in BOTH modes. Before F7 this was conflated with
          * tappability under one `enabled` flag, so Auto mode (where every bubble
          * is always tappable-in-spirit) never greyed at all and lost its only
