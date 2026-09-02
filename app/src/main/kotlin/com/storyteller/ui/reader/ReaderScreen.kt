@@ -57,8 +57,13 @@ fun ReaderScreen(
         state = state,
         onRetry = viewModel::onRetry,
         onBack = onBack,
-        onNext = viewModel::onNext,
-        onPrevious = viewModel::onPrevious,
+        // Arrow navigation is gone from ReaderViewModel (Task 3: tap-a-line-to-play
+        // replaces it). Wired to {} rather than removed from ReaderContent's
+        // signature here so the screen still compiles between now and Task 4,
+        // which rewrites this screen as a scrolling list and deletes these
+        // IconButtons for good.
+        onNext = {},
+        onPrevious = {},
         onBubbleTapped = viewModel::onBubbleTapped,
     )
 }

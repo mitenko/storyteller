@@ -39,6 +39,20 @@ class ReaderViewModel @Inject constructor(
     private var queued = 0
 
     /**
+     * The unit indices currently in the player's playlist, in playlist order.
+     *
+     * Replaces the assumption that playlist position N is unit N. That held while
+     * every playlist was the whole page from unit 0; an Auto-mode tap jumps to a
+     * line, so position 0 becomes the tapped unit and copying the position would
+     * mark the wrong line as sounding.
+     *
+     * A list rather than a start-offset integer: no harder to keep, correct for a
+     * playlist that is not a contiguous run, and getOrNull turns a stale position
+     * into a null marker rather than an exception.
+     */
+    private var playlistUnits: List<Int> = emptyList()
+
+    /**
      * Last observed player state. Mirrored into ReaderUiState.Playing so the reader
      * has an ending: nothing outside PagePlayerImpl observed PlaybackState before,
      * so the whole endOfPage()/pageComplete mechanism reported to no one.
@@ -54,7 +68,7 @@ class ReaderViewModel @Inject constructor(
     /** Whatever units are synthesized so far for the current page; what onBubbleTapped may play. */
     private var lastReady: List<PreparedUnit> = emptyList()
 
-    /** Which unit is on screen. Bounded at both ends in [moveTo]; reset alongside [queued]. */
+    /** Which unit is on screen. Bounded at both ends in [playingState] and [onLineTapped]; reset alongside [queued]. */
     private var current = 0
 
     init {
@@ -101,15 +115,23 @@ class ReaderViewModel @Inject constructor(
                 // value for the new page instead of resetting it, opening the
                 // reader on the wrong bubble.
                 (_uiState.value as? ReaderUiState.Playing)?.let {
-                    // Auto is the ONLY mode that may trust the player's position.
-                    // It builds one playlist per page in reading order from unit
-                    // 0, so position N is unit N. Tap plays a one-item playlist
-                    // and always reports position 0, so taking it here would move
-                    // the highlight to line 0 on every tap - onBubbleTapped already
-                    // recorded the real index and must win.
+                    // Auto is the ONLY mode that may trust the player's position -
+                    // Tap plays a one-item playlist and always reports position 0,
+                    // so taking it here would move the highlight to line 0 on every
+                    // tap; onBubbleTapped/onLineTapped already recorded the real
+                    // index and must win.
+                    //
+                    // Mapped, not copied: an Auto-mode tap (onLineTapped) REPLACES
+                    // the playlist starting at the tapped unit, so position 0 is
+                    // not unit 0 once a jump has happened. playlistUnits carries
+                    // the playlist's actual unit indices in order, and getOrNull
+                    // turns a stale/out-of-range position into a no-op rather than
+                    // an exception.
                     if (mode == ReadingMode.Auto && state is PlaybackState.Playing) {
-                        playingIndex = state.playlistIndex
-                        current = state.playlistIndex
+                        playlistUnits.getOrNull(state.playlistIndex)?.let { unitIndex ->
+                            playingIndex = unitIndex
+                            current = unitIndex
+                        }
                     }
                     _uiState.value = it.copy(playback = state, playingIndex = playingIndex, current = current)
                 }
@@ -132,6 +154,7 @@ class ReaderViewModel @Inject constructor(
                 queued = 0
                 lastReady = emptyList()
                 playingIndex = null
+                playlistUnits = emptyList()
                 current = 0
                 _uiState.value = ReaderUiState.ReadingPage
             }
@@ -180,6 +203,7 @@ class ReaderViewModel @Inject constructor(
                 queued = 0
                 lastReady = emptyList()
                 playingIndex = null
+                playlistUnits = emptyList()
                 current = 0
                 _uiState.value = ReaderUiState.Error(state.reason.message(), state.retryable)
             }
@@ -200,8 +224,10 @@ class ReaderViewModel @Inject constructor(
         if (queued == 0) {
             player.play(listOf(fresh.first()))
             fresh.drop(1).forEach(player::append)
+            playlistUnits = fresh.map { it.unit.index }
         } else {
             fresh.forEach(player::append)
+            playlistUnits = playlistUnits + fresh.map { it.unit.index }
         }
         queued = ready.size
     }
@@ -241,17 +267,38 @@ class ReaderViewModel @Inject constructor(
         )
     }
 
-    fun onNext() = moveTo(current + 1)
-
-    fun onPrevious() = moveTo(current - 1)
-
-    /** Bounded at both ends: there is no wrap-around, and no unit off the page. */
-    private fun moveTo(index: Int) {
+    /**
+     * Plays the tapped line. The only navigation the reader has, now that the
+     * arrows are gone: the list itself is how a child moves around the page.
+     *
+     * Tap mode plays that one line, as before. Auto mode JUMPS - it plays from the
+     * tapped line to the end of what is ready - so a child pointing at a picture
+     * continues the story from there rather than restarting a single line.
+     *
+     * A line whose audio is not synthesized yet is a no-op. Those rows are already
+     * greyed by `audioReady`, so the affordance and the behaviour agree.
+     */
+    fun onLineTapped(index: Int) {
         val state = _uiState.value as? ReaderUiState.Playing ?: return
         val bounded = index.coerceIn(0, (state.lines.size - 1).coerceAtLeast(0))
-        if (bounded == current) return
+        if (lastReady.none { it.unit.index == bounded }) return
+
         current = bounded
-        _uiState.value = state.copy(current = bounded)
+        playingIndex = bounded
+
+        val playlist = when (mode) {
+            ReadingMode.Tap -> lastReady.filter { it.unit.index == bounded }
+            ReadingMode.Auto -> lastReady.filter { it.unit.index >= bounded }
+        }
+        player.play(playlist)
+        player.endOfPage()
+        playlistUnits = playlist.map { it.unit.index }
+        // The playlist was REPLACED, so every ready unit is now either in it or
+        // deliberately behind it. Without this, queue() diffs the next cumulative
+        // `ready` against a stale count and silently drops a unit.
+        queued = lastReady.size
+
+        _uiState.value = state.copy(current = bounded, playingIndex = bounded)
     }
 
     /**

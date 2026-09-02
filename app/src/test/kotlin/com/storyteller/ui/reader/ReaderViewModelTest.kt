@@ -457,8 +457,7 @@ class ReaderViewModelTest {
         pipeline.emit(PipelineState.Ready(preparedUnits(3), image = null))
         advanceUntilIdle()
 
-        vm.onNext(); vm.onNext() // current = 2
-        vm.onBubbleTapped()
+        vm.onLineTapped(2)
         advanceUntilIdle()
 
         // Tap plays a ONE-ITEM playlist, so the player always reports position 0.
@@ -469,14 +468,13 @@ class ReaderViewModelTest {
         assertEquals(2, (vm.uiState.value as ReaderUiState.Playing).playingIndex)
     }
 
-    @Test fun `tapping the bubble calls endOfPage and marks the tapped unit as playing`() = runTest {
+    @Test fun `tapping a line calls endOfPage and marks the tapped unit as playing`() = runTest {
         val player = RecordingPlayer()
         val vm = readerViewModel(player, mode = ReadingMode.Tap)
         pipeline.emit(PipelineState.Ready(preparedUnits(3), image = null))
         advanceUntilIdle()
 
-        vm.onNext() // current = 1
-        vm.onBubbleTapped()
+        vm.onLineTapped(1)
         advanceUntilIdle()
 
         assertEquals(listOf(1), player.played.map { it.single().unit.index })
@@ -484,14 +482,13 @@ class ReaderViewModelTest {
         assertEquals(1, (vm.uiState.value as ReaderUiState.Playing).playingIndex)
     }
 
-    @Test fun `tapping the bubble for a unit whose audio is not ready is inert`() = runTest {
+    @Test fun `tapping a line whose audio is not ready is inert`() = runTest {
         val player = RecordingPlayer()
         val vm = readerViewModel(player, mode = ReadingMode.Tap)
         pipeline.emit(PipelineState.Preparing(speechUnits(3), preparedUnits(1), image = null))
         advanceUntilIdle()
 
-        vm.onNext(); vm.onNext() // current = 2, whose audio is not ready
-        vm.onBubbleTapped()
+        vm.onLineTapped(2) // audio not ready for unit 2
         advanceUntilIdle()
 
         assertTrue(player.played.isEmpty())
@@ -605,31 +602,6 @@ class ReaderViewModelTest {
         )
     }
 
-    @Test fun `next and previous move one unit and stop at the ends`() = runTest {
-        val vm = readerViewModel(RecordingPlayer(), mode = ReadingMode.Tap)
-        pipeline.emit(PipelineState.Ready(preparedUnits(2), image = null))
-        advanceUntilIdle()
-
-        vm.onPrevious()
-        assertEquals("must not go before the first unit", 0, current(vm))
-
-        vm.onNext(); assertEquals(1, current(vm))
-        vm.onNext(); assertEquals("must not go past the last unit", 1, current(vm))
-    }
-
-    @Test fun `tapping the bubble plays the unit on screen`() = runTest {
-        val player = RecordingPlayer()
-        val vm = readerViewModel(player, mode = ReadingMode.Tap)
-        pipeline.emit(PipelineState.Ready(preparedUnits(3), image = null))
-        advanceUntilIdle()
-
-        vm.onNext()
-        vm.onBubbleTapped()
-        advanceUntilIdle()
-
-        assertEquals(listOf(1), player.played.map { it.single().unit.index })
-    }
-
     @Test fun `auto advances to the unit the player moved to`() = runTest {
         val player = RecordingPlayer()
         val vm = readerViewModel(player, mode = ReadingMode.Auto)
@@ -646,11 +618,10 @@ class ReaderViewModelTest {
      * I2: `playingIndex` alone does not catch a bug that lifts
      * `current = state.playlistIndex` out of the `mode == Auto` guard - Tap's
      * one-item playlist always reports position 0, and if the tapped unit also
-     * happened to be unit 0 (or `current` had never moved from its start), a
-     * leaked read would coincidentally match the correct value. Moving `current`
-     * to 2 via onNext() first - away from the tapped playlist's reported
-     * position of 0 - makes a leaked read distinguishable: the buggy value
-     * would be 0, not 2.
+     * happened to be unit 0, a leaked read would coincidentally match the
+     * correct value. Tapping line 2 first - away from the tapped playlist's
+     * reported position of 0 - makes a leaked read distinguishable: the buggy
+     * value would be 0, not 2.
      */
     @Test fun `tap does not let the player's playlist position overwrite current`() = runTest {
         val player = RecordingPlayer()
@@ -658,8 +629,7 @@ class ReaderViewModelTest {
         pipeline.emit(PipelineState.Ready(preparedUnits(3), image = null))
         advanceUntilIdle()
 
-        vm.onNext(); vm.onNext() // current = 2; the tapped playlist position will still be 0
-        vm.onBubbleTapped()
+        vm.onLineTapped(2)
         advanceUntilIdle()
 
         player.state.value = PlaybackState.Playing(0)
@@ -736,5 +706,112 @@ class ReaderViewModelTest {
         assertEquals(2, state.panels.size)
         assertEquals(listOf(0, 1), state.panels[0].lines.map { it.index })
         assertEquals(listOf(0, 1, 2), state.lines.map { it.index })
+    }
+
+    // --- Tap-a-line, and a safe Auto jump (Task 3) -----------------------------
+
+    /**
+     * Set by [readerInTapMode]/[readerInAutoMode] so a test body can inspect the
+     * player's recorded calls directly, the way [pipeline] is shared above.
+     */
+    private lateinit var player: FakePlayer
+
+    /**
+     * Drives the shared [pipeline] to a page of [unitCount] units, [readyCount] of
+     * them already synthesized, on a fresh [FakePlayer] stored in [player]. Any
+     * play()/append() calls this setup itself triggers - Auto mode queues its
+     * ready units immediately, Tap mode never does - are cleared before this
+     * returns: what a test's own setup does is not what any of these tests are
+     * about, only what happens after [ReaderViewModel.onLineTapped] is called.
+     */
+    private suspend fun TestScope.readerWithMode(
+        mode: ReadingMode,
+        unitCount: Int,
+        readyCount: Int,
+    ): ReaderViewModel {
+        player = FakePlayer()
+        val vm = readerViewModel(player, mode = mode)
+        pipeline.emit(
+            if (readyCount >= unitCount) {
+                PipelineState.Ready(preparedUnits(unitCount), image = null)
+            } else {
+                PipelineState.Preparing(speechUnits(unitCount), preparedUnits(readyCount), image = null)
+            },
+        )
+        advanceUntilIdle()
+        player.played.clear()
+        player.appended.clear()
+        return vm
+    }
+
+    private suspend fun TestScope.readerInTapMode(unitCount: Int, readyCount: Int = unitCount): ReaderViewModel =
+        readerWithMode(ReadingMode.Tap, unitCount, readyCount)
+
+    private suspend fun TestScope.readerInAutoMode(unitCount: Int, readyCount: Int = unitCount): ReaderViewModel =
+        readerWithMode(ReadingMode.Auto, unitCount, readyCount)
+
+    /** Advances the shared [pipeline] to Ready with [readyCount] synthesized units, as if synthesis just finished. */
+    private suspend fun TestScope.becomeReady(vm: ReaderViewModel, readyCount: Int) {
+        pipeline.emit(PipelineState.Ready(preparedUnits(readyCount), image = null))
+        advanceUntilIdle()
+    }
+
+    @Test fun `a tap in Tap mode plays just that line`() = runTest {
+        val vm = readerInTapMode(unitCount = 3)
+
+        vm.onLineTapped(2)
+
+        assertEquals(listOf(2), player.played)
+        assertEquals(2, (vm.uiState.value as ReaderUiState.Playing).playingIndex)
+    }
+
+    @Test fun `a tap in Auto mode plays from that line onward`() = runTest {
+        val vm = readerInAutoMode(unitCount = 4)
+
+        vm.onLineTapped(2)
+
+        assertEquals(listOf(2, 3), player.played)
+    }
+
+    @Test fun `a tap on a line whose audio is not ready does nothing`() = runTest {
+        val vm = readerInTapMode(unitCount = 3, readyCount = 1)
+        player.played.clear()
+
+        vm.onLineTapped(2)
+
+        assertEquals(emptyList<Int>(), player.played)
+    }
+
+    /**
+     * The first invariant from spec section 6.1. A jump replaces the playlist, so
+     * `queued` — which counts units already handed to the player — describes a
+     * playlist that no longer exists. Left unreset, the next unit to finish
+     * synthesising is appended against a stale count and an earlier unit is never
+     * heard at all.
+     */
+    @Test fun `a unit synthesised after an Auto jump is still heard, in order`() = runTest {
+        val vm = readerInAutoMode(unitCount = 6, readyCount = 5)
+
+        vm.onLineTapped(3)
+        player.played.clear()
+        becomeReady(vm, readyCount = 6)
+
+        // Unit 5 was ready but behind the jump; unit 6 is new. Neither may be lost.
+        assertEquals(listOf(5), player.appended)
+    }
+
+    /**
+     * The second invariant from spec section 6.1. After a jump the playlist starts
+     * at the tapped unit, so the player's position 0 IS that unit. Copying the
+     * position would mark line 0 as sounding and scroll the list to the wrong card.
+     */
+    @Test fun `playingIndex reports the unit index, not the playlist position`() = runTest {
+        val vm = readerInAutoMode(unitCount = 4)
+
+        vm.onLineTapped(2)
+        player.state.value = PlaybackState.Playing(playlistIndex = 0)
+        advanceUntilIdle()
+
+        assertEquals(2, (vm.uiState.value as ReaderUiState.Playing).playingIndex)
     }
 }
