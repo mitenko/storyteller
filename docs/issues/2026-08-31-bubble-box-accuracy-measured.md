@@ -795,3 +795,94 @@ It is also 33 units on four pages of one book, with one art style. The fill
 thresholds (luma >= 165, saturation <= 60) are tuned to white paper balloons and
 would need revisiting for a book that uses coloured or textured balloons, or
 black balloons with white lettering.
+
+
+---
+
+## 18. The panel, not the balloon, is what should be rendered
+
+A product correction that reframes this whole issue. The reader crops the speech
+**balloon** and shows it beside the spoken line — which shows a child the lettering
+they cannot read. What they want is the **picture**: the character speaking, the
+action. That is the **panel**.
+
+This is worth stating plainly because it changes what "accurate" means. Every
+measurement in sections 2-17 scores a balloon crop. If the panel is what gets
+rendered, balloon precision stops being the product requirement and becomes merely
+an input to finding the panel — and the tolerance is far looser, because a panel is
+ten to forty times the balloon's area.
+
+### 18.1 Pixel-based panel detection: unreliable
+
+Comic pages separate panels with gutters, so the classic approach is to project
+rows and columns, find near-uniform runs, and cut. A single global projection finds
+only horizontal tiers, because a full-page column profile crosses every tier and
+artwork in one bleeds across another's gutter. The standard remedy is a recursive
+X-Y cut: split on rows, then project columns within each strip, and recurse.
+
+Tested on all four bundles:
+
+| page | panels found | balloons in distinct panels |
+|---|---|---|
+| `page-1788284934899` | 5 | **7 across 5** — essentially correct |
+| `page-1788289251857` | 5 | 10 across 4, but 5 share one 48% region |
+| `page-1788294930134` | 2 | 10 across 2; 8 share a 72% region |
+| `page-1788295071078` | 1 | **all 6 in one whole-page region — total failure** |
+
+One page works, one is partial, two fail. Threshold-tuning moved which pages failed
+but not how many: a purity high enough to reject artwork also rejects the thin
+gutters, and a purity loose enough to catch them starts cutting through pictures.
+
+### 18.2 Asking the model for the panel: reliable
+
+The reason everything in this document has been hard is that balloons are *small*.
+A box 10% of the page off is catastrophic for a balloon occupying 3% of it. A panel
+occupies 12-36%, is bounded by a high-contrast frame, and is rectangular — a far
+easier target. So the same call that returns the transcript was asked for a `panel`
+box per unit alongside `bounds`.
+
+| page | units | distinct panels | every panel contains its balloon |
+|---|---|---|---|
+| `page-1788289251857` | 8 | **5** | yes |
+| `page-1788295071078` | 7 | **5** | yes |
+| `page-1788294930134` | 10 | **5** | yes (every exception was a unit with a null balloon, not a bad panel) |
+
+Three properties make this convincing beyond the counts:
+
+- **The panels tile the page.** On `page-1788289251857`: y 0-330, 332-657, then
+  659-1372 split into x 0-417 and 419-870, the right column splitting again at
+  y 1012/1014. That is a real comic layout, not five plausible-looking rectangles.
+- **Units in the same panel get byte-identical panel boxes.** Units 2, 3 and 4 all
+  return `0,332 870,657`. The model is not guessing per unit; it is reporting a
+  structure it has actually resolved.
+- **It works on `page-1788294930134`**, the dense page where OCR read zero words and
+  X-Y cut found two regions. Five panels, correctly tiled.
+
+### 18.3 Recommendation
+
+Render the **panel**, and get it from the model in the same call that already
+returns the transcript. It costs no extra request and no extra image: one more
+field per unit.
+
+That reorders everything still open in this document:
+
+- The balloon-snap flood fill in section 17 stops being the main event. It is still
+  worth having as a refinement — containment 0.887 to 1.000 on 76% of units — but
+  for highlighting a bubble within a panel, not for the primary crop.
+- The OCR split in sections 6.1 and 11 is finished. Section 17 refuted it on
+  reliability; this removes the requirement it was trying to satisfy.
+- The 0.5 IoU stop condition was written for balloon crops. It should be restated
+  for panels, where the honest test is whether the rendered picture shows the
+  moment being read aloud.
+
+### 18.4 What is not established
+
+Panel boxes have not been scored against ground truth, because there is none: OCR
+cannot supply panel extents, and no page has hand-labelled panels. The evidence
+above is structural consistency plus visual inspection, which is weaker than the
+containment numbers elsewhere in this document. Before this ships, at least one
+page should be hand-labelled with its true panel rectangles so the claim can be
+measured rather than argued.
+
+Three pages of one book, one art style. A page with overlapping, circular, or
+borderless panels has not been tried.
