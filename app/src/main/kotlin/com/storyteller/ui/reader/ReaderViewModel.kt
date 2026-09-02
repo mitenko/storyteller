@@ -318,6 +318,7 @@ class ReaderViewModel @Inject constructor(
 
     fun onRetry() {
         queued = 0
+        playlistUnits = emptyList()
         current = 0
         pipeline.retry()
     }

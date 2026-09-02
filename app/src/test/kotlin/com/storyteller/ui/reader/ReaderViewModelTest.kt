@@ -783,17 +783,52 @@ class ReaderViewModelTest {
     }
 
     /**
+     * `bounded` is inherited unchanged from the deleted `moveTo`: there is no
+     * wrap-around, and no unit off the page. Every other new test here passes an
+     * in-range index, so this is the only coverage of the coerceIn call itself -
+     * both a negative index and one past the last line must land on a real line.
+     */
+    @Test fun `a tap on an out-of-range index is clamped to the nearest valid line`() = runTest {
+        val vm = readerInTapMode(unitCount = 3)
+
+        vm.onLineTapped(-5)
+        assertEquals(listOf(0), player.played)
+        assertEquals(0, (vm.uiState.value as ReaderUiState.Playing).playingIndex)
+
+        player.played.clear()
+        vm.onLineTapped(99)
+        assertEquals(listOf(2), player.played)
+        assertEquals(2, (vm.uiState.value as ReaderUiState.Playing).playingIndex)
+    }
+
+    /**
      * The first invariant from spec section 6.1. A jump replaces the playlist, so
      * `queued` — which counts units already handed to the player — describes a
      * playlist that no longer exists. Left unreset, the next unit to finish
      * synthesising is appended against a stale count and an earlier unit is never
      * heard at all.
+     *
+     * A continuously-Auto session cannot discriminate this: queue() keeps `queued`
+     * in lockstep with `lastReady` throughout, so `queued == lastReady.size` would
+     * already hold before any tap even if onLineTapped's own reset were deleted
+     * outright. The setup below breaks that coincidence on purpose: the page is
+     * prepared while the mode is still Tap, so queue() is gated off and `queued`
+     * stays at 0 while `lastReady` advances to 5 - only onLineTapped's own
+     * `queued = lastReady.size` can make the post-jump append land on unit 5
+     * rather than replaying units 0-4.
      */
     @Test fun `a unit synthesised after an Auto jump is still heard, in order`() = runTest {
-        val vm = readerInAutoMode(unitCount = 6, readyCount = 5)
+        val settings = FakeSettingsRepository(ReadingMode.Tap)
+        player = FakePlayer()
+        val vm = ReaderViewModel(pipeline, player, settings)
+        pipeline.emit(PipelineState.Preparing(speechUnits(6), preparedUnits(5), image = null))
+        advanceUntilIdle()
+        settings.setMode(ReadingMode.Auto)
+        advanceUntilIdle()
 
         vm.onLineTapped(3)
         player.played.clear()
+        player.appended.clear()
         becomeReady(vm, readyCount = 6)
 
         // Unit 5 was ready but behind the jump; unit 6 is new. Neither may be lost.
