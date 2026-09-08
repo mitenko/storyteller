@@ -88,7 +88,11 @@ class ReaderScreenTest {
             )
         }
 
-        compose.onNodeWithContentDescription("Take another photo").performClick()
+        // Retargeted, not deleted: the way back to the camera is now the floating
+        // button rather than "Take another photo" below the list. The behaviour
+        // this test guards — that a child can move on mid-page, without waiting
+        // for the page to finish — is unchanged.
+        compose.onNodeWithContentDescription("Read the next page").performClick()
         assertEquals(1, backs)
     }
 
@@ -270,6 +274,33 @@ class ReaderScreenTest {
         compose.onNodeWithTag(PANEL_IMAGE_TEST_TAG).performClick()
 
         assertEquals(0, tapped)
+    }
+
+    /**
+     * The FAB replaced the "Take another photo" button rather than joining it:
+     * two controls for one action is the thing ReaderFrame's own kdoc argues
+     * against. This fails if the old button comes back alongside it.
+     */
+    @Test fun `a playing page offers exactly one way on to the next page`() {
+        var backs = 0
+        compose.setContent {
+            ReaderContent(
+                state = playing(listOf(line("Bear", "Hello"))),
+                onRetry = {}, onBack = { backs++ },
+            )
+        }
+
+        compose.onAllNodesWithContentDescription("Read the next page").assertCountEquals(1)
+        compose.onAllNodesWithContentDescription("Take another photo").assertCountEquals(0)
+        compose.onNodeWithTag(NEXT_PAGE_FAB_TEST_TAG).performClick()
+
+        assertEquals(1, backs)
+    }
+
+    @Test fun `the next-page button is not offered while the page is still being read`() {
+        compose.setContent { ReaderContent(ReaderUiState.ReadingPage, onRetry = {}, onBack = {}) }
+
+        compose.onAllNodesWithTag(NEXT_PAGE_FAB_TEST_TAG).assertCountEquals(0)
     }
 
     @Test fun `a group with a real image renders the decoded panel`() {
