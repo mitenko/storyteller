@@ -1,31 +1,25 @@
 package com.storyteller.ui.capture
 
-import android.graphics.BitmapFactory
 import android.util.Log
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
@@ -33,7 +27,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.storyteller.R
-import com.storyteller.domain.model.PageImage
 
 private const val TAG = "CaptureScreen"
 
@@ -89,11 +82,18 @@ fun CaptureScreen(
         when (val current = state) {
             CaptureUiState.Idle -> ScanPrompt(onScan = startScan)
             is CaptureUiState.Failed -> ScanFailed(reason = current.reason, onRetry = startScan)
-            is CaptureUiState.Captured -> CapturedPage(
-                image = current.image,
-                onRetake = viewModel::onRetake,
-                onConfirm = { confirmAndNavigate(viewModel, onNavigateToReader) },
-            )
+            // No review step. The ML Kit scanner already ends in its own
+            // confirm-or-retake screen, so a second "is this page alright?" made a
+            // child approve the same photograph twice to hear one page read. The
+            // scan now goes straight to the reader.
+            //
+            // Keyed on the image so a NEW scan re-fires this; onHandedOff() then
+            // returns the screen to Idle, without which coming back for the next
+            // page would bounce straight into the reader again.
+            is CaptureUiState.Captured -> LaunchedEffect(current.image) {
+                confirmAndNavigate(viewModel, onNavigateToReader)
+                viewModel.onHandedOff()
+            }
         }
 
         IconButton(
@@ -141,47 +141,6 @@ internal fun ScanFailed(reason: String, onRetry: () -> Unit) {
                 painter = painterResource(R.drawable.ic_refresh),
                 contentDescription = "Try again",
             )
-        }
-    }
-}
-
-/**
- * The review branch. It must actually SHOW the page: the user judges it visually
- * and retakes, so two buttons over an empty Box is not a review screen.
- *
- * PageImage.bytes is already downscaled to 1568px or less, so decoding it for
- * display is cheap - but it is still remembered on the image rather than decoded
- * again on every recomposition.
- */
-@Composable
-internal fun CapturedPage(
-    image: PageImage,
-    onRetake: () -> Unit,
-    onConfirm: () -> Unit,
-) {
-    Box(Modifier.fillMaxSize()) {
-        val preview = remember(image) {
-            BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size)?.asImageBitmap()
-        }
-        if (preview != null) {
-            Image(
-                bitmap = preview,
-                contentDescription = "The page you just scanned",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit,
-            )
-        }
-
-        Row(
-            Modifier.fillMaxWidth().align(Alignment.BottomCenter).padding(24.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-        ) {
-            OutlinedButton(onClick = onRetake) {
-                Icon(painter = painterResource(R.drawable.ic_refresh), contentDescription = "Retake")
-            }
-            Button(onClick = onConfirm) {
-                Icon(painter = painterResource(R.drawable.ic_check), contentDescription = "Read this page")
-            }
         }
     }
 }

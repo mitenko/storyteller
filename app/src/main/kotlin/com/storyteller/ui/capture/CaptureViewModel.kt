@@ -56,6 +56,24 @@ class CaptureViewModel @Inject constructor(
     }
 
     /**
+     * The captured page has been handed to the pipeline and the reader is showing
+     * it, so this screen goes back to Idle.
+     *
+     * It must NOT go through [onRetake], which looks equivalent and is not:
+     * [onRetake] calls [discardAnyCapturedPage], and resetting the pipeline here
+     * would kill the very read the reader has just navigated to.
+     *
+     * The reason this exists at all is that [CaptureViewModel] is scoped to the
+     * nav back-stack entry, so it survives the trip to the reader. Left in
+     * [CaptureUiState.Captured], the screen would auto-advance again the moment a
+     * child came back for the next page, bouncing them straight into the reader
+     * they just left.
+     */
+    fun onHandedOff() {
+        if (_uiState.value is CaptureUiState.Captured) _uiState.value = CaptureUiState.Idle
+    }
+
+    /**
      * Replacing or dropping a captured page must reset the pipeline, or a read
      * started for the previous page keeps running and the reader shows it.
      *

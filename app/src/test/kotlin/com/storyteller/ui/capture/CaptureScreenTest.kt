@@ -5,7 +5,6 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import com.storyteller.domain.model.PageImage
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -14,8 +13,12 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * Exercises the three branches through their stateless composables, so none of
+ * Exercises the screen's branches through their stateless composables, so none of
  * them needs Play Services, a scanner, or Hilt.
+ *
+ * There are two now, not three: the captured branch no longer draws anything. It
+ * hands the page to the pipeline and navigates, which is behaviour rather than
+ * pixels, and is covered in CaptureViewModelTest instead.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -23,7 +26,6 @@ class CaptureScreenTest {
 
     @get:Rule val compose = createComposeRule()
 
-    private fun pageImage() = PageImage(ByteArray(64) { it.toByte() }, "image/jpeg")
 
     @Test fun `the idle screen offers a way to scan`() {
         compose.setContent { ScanPrompt(onScan = {}) }
@@ -50,22 +52,10 @@ class CaptureScreenTest {
         assertEquals(1, retries)
     }
 
-    @Test fun `the review branch shows the page it is asking about`() {
-        compose.setContent { CapturedPage(pageImage(), onRetake = {}, onConfirm = {}) }
-        compose.onNodeWithContentDescription("The page you just scanned").assertIsDisplayed()
-        compose.onNodeWithContentDescription("Retake").assertIsDisplayed()
-        compose.onNodeWithContentDescription("Read this page").assertIsDisplayed()
-    }
-
-    @Test fun `review buttons report retake and confirm separately`() {
-        var retakes = 0
-        var confirms = 0
-        compose.setContent {
-            CapturedPage(pageImage(), onRetake = { retakes++ }, onConfirm = { confirms++ })
-        }
-        compose.onNodeWithContentDescription("Retake").performClick()
-        compose.onNodeWithContentDescription("Read this page").performClick()
-        assertEquals(1, retakes)
-        assertEquals(1, confirms)
-    }
+    /*
+     * The review branch's two tests are gone with the branch itself: the scan now
+     * goes straight to the reader, so there is no "is this page alright?" screen
+     * to assert on. What replaced them is the hand-off test in
+     * CaptureViewModelTest, which guards the part that can actually break.
+     */
 }
