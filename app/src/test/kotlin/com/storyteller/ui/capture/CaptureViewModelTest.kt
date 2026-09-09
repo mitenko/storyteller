@@ -59,6 +59,47 @@ class CaptureViewModelTest {
         assertTrue(pipeline.started.isEmpty())
     }
 
+    /**
+     * The hazard created by skipping the review screen. CaptureViewModel is scoped
+     * to the nav entry, so it is still in Captured when a child comes back for the
+     * next page - and the screen auto-advances on Captured. Without this reset they
+     * would be bounced straight into the reader they just left.
+     */
+    @Test fun `hand-off returns to Idle so coming back does not bounce into the reader`() = runTest {
+        val pipeline = RecordingPipeline()
+        val vm = CaptureViewModel(pipeline)
+        vm.onScanned(jpeg())
+        vm.onConfirm()
+        vm.onHandedOff()
+
+        assertEquals(CaptureUiState.Idle, vm.uiState.value)
+    }
+
+    /**
+     * The distinction that makes onHandedOff a separate method from onRetake: the
+     * read it just started must survive. Resetting here would kill the page the
+     * reader has already navigated to.
+     */
+    @Test fun `hand-off does NOT reset the pipeline`() = runTest {
+        val pipeline = RecordingPipeline()
+        val vm = CaptureViewModel(pipeline)
+        vm.onScanned(jpeg())
+        vm.onConfirm()
+        vm.onHandedOff()
+
+        assertEquals(1, pipeline.started.size)
+        assertEquals(0, pipeline.resets)
+    }
+
+    @Test fun `hand-off before any scan does nothing`() = runTest {
+        val pipeline = RecordingPipeline()
+        val vm = CaptureViewModel(pipeline)
+        vm.onHandedOff()
+
+        assertEquals(CaptureUiState.Idle, vm.uiState.value)
+        assertEquals(0, pipeline.resets)
+    }
+
     @Test fun `retake returns to Idle and resets the pipeline so a stale page cannot be shown`() = runTest {
         val pipeline = RecordingPipeline()
         val vm = CaptureViewModel(pipeline)

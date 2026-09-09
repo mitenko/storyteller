@@ -82,4 +82,49 @@ class PanelGroupingTest {
         assertNull(groups.groupIndexOfLine(7))
         assertNull(groups.groupIndexOfLine(-1))
     }
+
+    // --- lineForTap: successive taps on one panel walk its lines ---
+
+    /**
+     * A panel with two balloons used to re-read its FIRST line on every tap,
+     * because the picture was wired straight to `group.lines.first()`. A child
+     * tapping a two-balloon panel heard the same line for ever and never the reply.
+     */
+    @Test fun `an untouched panel reads its first line`() {
+        val group = listOf(line(3, a), line(4, a)).groupByPanel().single()
+
+        assertEquals(3, group.lineForTap(lastPlayed = null))
+    }
+
+    @Test fun `a second tap reads the second line`() {
+        val group = listOf(line(3, a), line(4, a)).groupByPanel().single()
+
+        assertEquals(4, group.lineForTap(lastPlayed = 3))
+    }
+
+    /**
+     * Past the end it wraps rather than stalling or spilling into the next panel.
+     * Stalling would make the picture look broken; spilling would read a line whose
+     * picture is somewhere else on screen, which is the bug this whole reader
+     * exists to avoid.
+     */
+    @Test fun `tapping past the last line wraps to the first`() {
+        val group = listOf(line(3, a), line(4, a)).groupByPanel().single()
+
+        assertEquals(3, group.lineForTap(lastPlayed = 4))
+    }
+
+    /** A cursor sitting in some OTHER panel means this panel starts at its own top. */
+    @Test fun `a cursor outside the panel reads the panel's first line`() {
+        val group = listOf(line(3, a), line(4, a)).groupByPanel().single()
+
+        assertEquals(3, group.lineForTap(lastPlayed = 9))
+    }
+
+    @Test fun `a single-line panel always reads that line`() {
+        val group = listOf(line(7, a)).groupByPanel().single()
+
+        assertEquals(7, group.lineForTap(lastPlayed = null))
+        assertEquals(7, group.lineForTap(lastPlayed = 7))
+    }
 }

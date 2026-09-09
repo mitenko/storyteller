@@ -109,7 +109,7 @@ fun ReaderContent(
                         .testTag(NEXT_PAGE_FAB_TEST_TAG),
                 ) {
                     Icon(
-                        painter = painterResource(R.drawable.ic_photo_camera),
+                        painter = painterResource(R.drawable.ic_arrow_forward),
                         contentDescription = "Read the next page",
                     )
                 }
@@ -169,7 +169,8 @@ fun ReaderContent(
                                 group = group,
                                 image = state.image,
                                 playingIndex = state.playingIndex,
-                                nextLine = state.nextLine,
+                                focusLine = state.focusLine,
+                                lastPlayed = state.lastPlayedLine,
                                 onLineTapped = {
                                     scrollSuspended = false
                                     onLineTapped(it)
@@ -222,11 +223,11 @@ private fun ReaderFrame(
     Scaffold(
         topBar = { TopAppBar(title = { Text("Storyteller") }) },
         floatingActionButton = floatingActionButton,
-        // Lower LEFT, not the conventional right: a child holds a phone in both
-        // hands to look at a picture book, and the right thumb is the one that
-        // brushes the screen while scrolling. It is also well clear of the line
-        // rows, which is where every other tap on this screen lands.
-        floatingActionButtonPosition = FabPosition.Start,
+        // Lower right, the conventional corner. This was Start for a while, on the
+        // argument that a child holds a phone two-handed and the right thumb brushes
+        // the screen while scrolling - but seen on a device it read as misplaced,
+        // and an unfamiliar corner costs more than the stray touch it avoided.
+        floatingActionButtonPosition = FabPosition.End,
     ) { padding ->
         content(padding)
     }
@@ -257,11 +258,12 @@ private val FAB_CLEARANCE = 96.dp
 internal const val NEXT_PAGE_FAB_TEST_TAG = "next_page_fab"
 
 /**
- * The ring drawn around the line a child should tap next. Thick enough for a
- * small child to pick out at arm's length without being a second sounding marker.
+ * The ring drawn around the line a child should be looking at - the one sounding,
+ * or the one to tap when nothing is. Thick enough for a small child to pick out at
+ * arm's length.
  */
-private val NEXT_LINE_BORDER = 2.dp
-private val NEXT_LINE_CORNER = 12.dp
+private val FOCUS_RING_BORDER = 2.dp
+private val FOCUS_RING_CORNER = 12.dp
 
 /**
  * The alpha a line's content renders at (I2) - pulled out to a plain,
@@ -318,9 +320,14 @@ internal fun PanelCard(
     playingIndex: Int?,
     onLineTapped: (Int) -> Unit,
     modifier: Modifier = Modifier,
-    nextLine: Int? = null,
+    focusLine: Int? = null,
+    lastPlayed: Int? = null,
 ) {
     val first = group.lines.first()
+    // Which line THIS tap on the picture reads. Successive taps walk the panel's
+    // lines rather than re-reading its first one for ever.
+    val tapTarget = group.lineForTap(lastPlayed)
+    val tapTargetReady = group.lines.any { it.index == tapTarget && it.audioReady }
     val bitmap by produceState<ImageBitmap?>(null, group.panel, first.index, first.bounds, image) {
         value = image?.let { page ->
             withContext(Dispatchers.Default) { cropBubble(page, first.bounds, group.panel) }
@@ -351,9 +358,19 @@ internal fun PanelCard(
                     // and only the ~50dp text row responded, which reads as the app
                     // being broken rather than as a smaller target.
                     //
-                    // It plays the group's first line: exactly what tapping that
-                    // line's own row does, so there is one rule rather than two.
-                    .clickable(enabled = first.audioReady) { onLineTapped(first.index) }
+                    // It plays the line [lineForTap] chooses - the panel's first
+                    // line, then its second, and so on - so a panel holding two
+                    // balloons reads them both. Tapping a line's own ROW still
+                    // plays exactly that line; the picture is the "and then?"
+                    // control, the row is the "this one" control.
+                    //
+                    // Enablement follows the TARGET line, not the first: in a
+                    // half-synthesised panel whose first line is ready and second
+                    // is not, gating on the first would offer a tap that silently
+                    // does nothing.
+                    .clickable(enabled = tapTargetReady) {
+                        tapTarget?.let(onLineTapped)
+                    }
                     // Hidden from the accessibility tree, not labelled. It is a
                     // redundant target for the same action the row below already
                     // exposes with a proper name; a clickable node with a null
@@ -368,7 +385,7 @@ internal fun PanelCard(
             LineRow(
                 line = line,
                 sounding = playingIndex == line.index,
-                isNext = nextLine == line.index,
+                isFocused = focusLine == line.index,
                 onTap = { onLineTapped(line.index) },
             )
         }
@@ -382,7 +399,7 @@ internal fun LineRow(
     sounding: Boolean,
     onTap: () -> Unit,
     modifier: Modifier = Modifier,
-    isNext: Boolean = false,
+    isFocused: Boolean = false,
 ) {
     Column(
         modifier
@@ -394,23 +411,23 @@ internal fun LineRow(
             )
             // The ring goes OUTSIDE the alpha, so it stays solid on a line whose
             // audio is still being synthesised. That line is still the right one
-            // to aim at; it is just not ready yet, and a ghosted target would say
+            // to look at; it is just not ready yet, and a ghosted target would say
             // the opposite.
             .then(
-                if (isNext) {
+                if (isFocused) {
                     Modifier
-                        .clip(RoundedCornerShape(NEXT_LINE_CORNER))
+                        .clip(RoundedCornerShape(FOCUS_RING_CORNER))
                         .border(
-                            NEXT_LINE_BORDER,
+                            FOCUS_RING_BORDER,
                             MaterialTheme.colorScheme.primary,
-                            RoundedCornerShape(NEXT_LINE_CORNER),
+                            RoundedCornerShape(FOCUS_RING_CORNER),
                         )
                 } else {
                     Modifier
                 },
             )
             .alpha(contentAlphaFor(line.audioReady))
-            .padding(vertical = 4.dp, horizontal = if (isNext) 8.dp else 0.dp),
+            .padding(vertical = 4.dp, horizontal = if (isFocused) 8.dp else 0.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(line.speaker, style = MaterialTheme.typography.labelLarge)

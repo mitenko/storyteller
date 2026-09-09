@@ -45,3 +45,30 @@ fun List<ReaderUiState.PanelGroup>.groupIndexOfLine(lineIndex: Int): Int? {
     val index = indexOfFirst { group -> group.lines.any { it.index == lineIndex } }
     return index.takeIf { it >= 0 }
 }
+
+/**
+ * Which line a tap on this panel's PICTURE should read, given the last line the
+ * page played ([lastPlayed], null if none yet).
+ *
+ * Successive taps walk the panel's lines. The picture used to be wired straight to
+ * `group.lines.first()`, so a panel holding two balloons re-read its first line on
+ * every tap and a child never heard the reply — on a real page, cards holding two
+ * lines each are common (see the 2026-09-09 bundles).
+ *
+ * Past the last line it WRAPS rather than stalling or spilling into the next
+ * panel. Stalling makes the picture look broken to a child who is still tapping;
+ * spilling would read a line whose picture is somewhere else on screen, which is
+ * the confusion this reader exists to remove.
+ *
+ * A [lastPlayed] belonging to some other panel is the same case as none: this
+ * panel starts at its own first line.
+ *
+ * Pure, and here rather than in the composable, so the rule is unit-tested without
+ * a Compose harness — the same reason [groupIndexOfLine] lives here.
+ */
+fun ReaderUiState.PanelGroup.lineForTap(lastPlayed: Int?): Int? {
+    val indices = lines.map { it.index }
+    if (indices.isEmpty()) return null
+    val position = indices.indexOf(lastPlayed)
+    return if (position >= 0 && position + 1 < indices.size) indices[position + 1] else indices.first()
+}

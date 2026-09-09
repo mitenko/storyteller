@@ -62,14 +62,30 @@ are extractable from the APK. The seam for a key-holding proxy sits entirely in
 Deferred: LRU eviction and cache size caps, WiFi pre-checks, device-TTS
 fallback, multiple profiles, book recognition, user-editable voice assignments.
 
+The candidate features, with sizes, dependencies and a recommended order, are in
+[`docs/BACKLOG.md`](BACKLOG.md).
+
+Nice-to-have, measured and deliberately not scheduled: **panel-scoped speaker
+identification** — a second vision call per panel that says who speaks each line
+and boxes them in the picture. It works, and it is the only way to get a speaker's
+*position*, but it does not improve the speaker's *name* over a one-paragraph
+prompt fix, and it costs five extra calls per page. See
+[`docs/issues/2026-09-08-speaker-attribution-measured.md`](issues/2026-09-08-speaker-attribution-measured.md)
+for the measurement and for what would promote it.
+
 ### What got deleted along the way
 
 - **The character "badge"** — a small cropped portrait shown per character —
   and its Room column (`character_voice.badgePath`, added then dropped by a
   migration; see `StorytellerDatabase.kt`).
 - **The `characters` array** the vision call used to return separately from
-  the per-line units — dropped from the JSON schema; speaker attribution now
-  comes entirely from each unit's own `speaker` field.
+  the per-line units — dropped from the *client*, not from the schema. Speaker
+  attribution comes entirely from each unit's own `speaker` field, but
+  `PAGE_SCHEMA` still declares `characters` and still lists it as `required`, and
+  `pageInstruction` still asks for it. `PageDto` declares only `units`, so the
+  answer is parsed away. The model is still paying output tokens to enumerate a
+  cast nobody reads — which is also a ready-made channel for a character roster,
+  should one be wanted (`docs/BACKLOG.md` #3).
 - **The transcript list** — a scrollable list of every line on the page,
   replaced by the one-bubble-at-a-time reader above.
 
