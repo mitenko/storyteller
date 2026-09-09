@@ -73,6 +73,19 @@ sealed interface ReaderUiState {
          * Derived, not stored, for the same reason as [lines]: a second copy could
          * disagree with the playback state it is supposed to describe.
          */
+        /**
+         * The last line the page actually played, or null if none has.
+         *
+         * The cursor a panel tap walks from - see [lineForTap]. It is not simply
+         * [current], which already reads 0 on a page nothing has touched: without
+         * the [PlaybackState.Idle] check, the very first tap on the first panel
+         * would skip its opening line and read the second. Same trap as
+         * [focusLine], and worth stating twice because both derive from [current]
+         * and only one of them is obvious.
+         */
+        val lastPlayedLine: Int? get() =
+            playingIndex ?: current.takeIf { playback != PlaybackState.Idle }
+
         val focusLine: Int? get() {
             val candidate = when {
                 playingIndex != null -> playingIndex

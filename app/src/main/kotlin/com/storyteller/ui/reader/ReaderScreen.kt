@@ -170,6 +170,7 @@ fun ReaderContent(
                                 image = state.image,
                                 playingIndex = state.playingIndex,
                                 focusLine = state.focusLine,
+                                lastPlayed = state.lastPlayedLine,
                                 onLineTapped = {
                                     scrollSuspended = false
                                     onLineTapped(it)
@@ -320,8 +321,13 @@ internal fun PanelCard(
     onLineTapped: (Int) -> Unit,
     modifier: Modifier = Modifier,
     focusLine: Int? = null,
+    lastPlayed: Int? = null,
 ) {
     val first = group.lines.first()
+    // Which line THIS tap on the picture reads. Successive taps walk the panel's
+    // lines rather than re-reading its first one for ever.
+    val tapTarget = group.lineForTap(lastPlayed)
+    val tapTargetReady = group.lines.any { it.index == tapTarget && it.audioReady }
     val bitmap by produceState<ImageBitmap?>(null, group.panel, first.index, first.bounds, image) {
         value = image?.let { page ->
             withContext(Dispatchers.Default) { cropBubble(page, first.bounds, group.panel) }
@@ -352,9 +358,19 @@ internal fun PanelCard(
                     // and only the ~50dp text row responded, which reads as the app
                     // being broken rather than as a smaller target.
                     //
-                    // It plays the group's first line: exactly what tapping that
-                    // line's own row does, so there is one rule rather than two.
-                    .clickable(enabled = first.audioReady) { onLineTapped(first.index) }
+                    // It plays the line [lineForTap] chooses - the panel's first
+                    // line, then its second, and so on - so a panel holding two
+                    // balloons reads them both. Tapping a line's own ROW still
+                    // plays exactly that line; the picture is the "and then?"
+                    // control, the row is the "this one" control.
+                    //
+                    // Enablement follows the TARGET line, not the first: in a
+                    // half-synthesised panel whose first line is ready and second
+                    // is not, gating on the first would offer a tap that silently
+                    // does nothing.
+                    .clickable(enabled = tapTargetReady) {
+                        tapTarget?.let(onLineTapped)
+                    }
                     // Hidden from the accessibility tree, not labelled. It is a
                     // redundant target for the same action the row below already
                     // exposes with a proper name; a clickable node with a null

@@ -5,6 +5,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertCountEquals
@@ -239,41 +240,45 @@ class ReaderScreenTest {
      * PICTURE. Before this it was inert and only the ~50dp text row responded,
      * which reads as the app being broken rather than as a smaller target.
      *
-     * It reports the group's FIRST line — the same line tapping that row reports —
-     * so there is one rule rather than two. This test would fail if the image
-     * stopped being clickable, or if it reported some other line.
+     * It used to report the group's FIRST line on every tap, which meant a panel
+     * holding two balloons re-read its opening line for ever and the reply was
+     * unreachable from the picture. Successive taps now WALK the panel's lines and
+     * wrap at the end. Driven through real recomposition rather than three
+     * independent states, because the walking is the thing under test.
      */
-    @Test fun `tapping the panel picture reports the group's first line`() {
-        var tapped: Int? = null
+    @Test fun `successive taps on one panel picture walk its lines and wrap`() {
+        val taps = mutableListOf<Int>()
         val bmp = Bitmap.createBitmap(800, 600, Bitmap.Config.ARGB_8888)
         val bytes = ByteArrayOutputStream().also { bmp.compress(Bitmap.CompressFormat.JPEG, 90, it) }.toByteArray()
         val panel = BoundingBox(0.1f, 0.1f, 0.9f, 0.9f)
 
         compose.setContent {
+            // Stands in for the ViewModel: a tap becomes the new playing line.
+            var played by remember { mutableStateOf<Int?>(null) }
             ReaderContent(
                 state = ReaderUiState.Playing(
-                    // Two lines in ONE panel: a tap on the picture must report the
-                    // first of them, not the last rendered or the card's position.
                     panels = listOf(
                         line("Bear", "first line", index = 0, panel = panel),
                         line("Bear", "second line", index = 1, panel = panel),
                     ).groupByPanel(),
-                    current = 0,
+                    current = played ?: 0,
                     image = PageImage(bytes, "image/jpeg"),
-                    playback = PlaybackState.Playing(0),
-                    mode = ReadingMode.Auto,
-                    playingIndex = null,
+                    playback = played?.let { PlaybackState.Playing(it) } ?: PlaybackState.Idle,
+                    mode = ReadingMode.Tap,
+                    playingIndex = played,
                 ),
-                onRetry = {}, onBack = {}, onLineTapped = { tapped = it },
+                onRetry = {}, onBack = {},
+                onLineTapped = { taps += it; played = it },
             )
         }
 
         compose.waitUntil(timeoutMillis = 5_000) {
             compose.onAllNodesWithTag(PANEL_IMAGE_TEST_TAG).fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onNodeWithTag(PANEL_IMAGE_TEST_TAG).performClick()
+        repeat(3) { compose.onNodeWithTag(PANEL_IMAGE_TEST_TAG).performClick() }
 
-        assertEquals(0, tapped)
+        // First line, then the reply, then back round to the first.
+        assertEquals(listOf(0, 1, 0), taps)
     }
 
     /**
