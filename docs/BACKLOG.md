@@ -174,10 +174,31 @@ picker becomes what it sounds like.
 **Also worth deciding:** whether the choice is per character, per book, or global,
 which is the same question #2's book-scoping asks (2.2).
 
+**Comparing voices on one line is the expensive gesture, and the cache is why.**
+Audio is keyed on `sha256(voiceId|text)`, so every candidate voice against the same
+line is a separate synthesis and a separate cached file — auditioning six voices on
+one line costs six syntheses, not one. That is fine once (the results cache, so
+re-auditioning is free) and painful if a child taps through voices repeatedly.
+
+Three ways to keep it cheap, and 9.2a should pick one:
+
+- **A short fixed audition line** shared across every character, so the whole voice
+  pool is synthesised once ever and every later comparison is a cache hit. Cheapest
+  by far; the child judges a voice on words that are not their story.
+- **The page's shortest line** as the audition text. Still real dialogue, still
+  cheap, and it caches per line rather than per pool.
+- **The line in hand**, whatever it is. Truest to the choice being made, and the
+  only option whose cost scales with how much a child fiddles.
+
+Recommended: the second. It keeps the judgement honest — a real line from the book
+in front of them — without letting a bored child run up the bill on a long
+paragraph.
+
 | id | task | size | notes |
 |---|---|---|---|
 | 9.1 | Fetch and cache the voice pool with names, not just ids | S | `voice_list` stores a CSV of ids today; a picker needs labels |
-| 9.2 | Audition: play a sample line in a candidate voice | M | Cache the sample like any other audio, or it costs per tap |
+| 9.2 | Audition: play a candidate voice on THIS line's real text | M | Not a canned sample — a child judges a voice by the words they just heard it get wrong |
+| 9.2a | Compare several voices on the same line, back to back | M | The actual choosing gesture. See the cost note below |
 | 9.3 | A picker listing the page's characters and their current voice | M | New screen or a sheet from the reader |
 | 9.4 | Write the choice through, overriding the random assignment | S | `voiceFor` currently never revisits a stored row |
 | 9.5 | Re-synthesise the page's lines for a changed voice | M | The audio cache is keyed on `voiceId|text`, so old audio stays valid and new audio is a fresh miss — the pipeline just needs to re-request |
