@@ -45,23 +45,37 @@ sealed interface ReaderUiState {
         val lines: List<Line> get() = panels.flatMap { it.lines }
 
         /**
-         * The line a child should tap next, or null when the page is done.
+         * The line a child should be LOOKING at, or null when there is none.
          *
-         * A pre-reader cannot read ahead to work out where to go next, so the
-         * reader rings this line to point at it. Shown in BOTH modes: in Tap it is
-         * the instruction, and in Auto it previews what is coming.
+         * A pre-reader cannot read ahead, so the reader rings one line to point at
+         * it. What that line is depends on whether anything is sounding:
          *
-         * [PlaybackState.Idle] is what separates a page nothing has played yet
-         * (ring the first line) from one where the first line has just finished
-         * (ring the second). Without it, a fresh page would point past the line it
-         * wants the child to start on, because [current] already reads 0.
+         * - something sounding -> the sounding line. The child should be watching
+         *   the words being read to them.
+         * - nothing sounding -> the line to tap next, which is an instruction.
+         *
+         * This was `nextLine`, and it returned `playingIndex + 1` unconditionally,
+         * so the ring was ALWAYS one line ahead of the one being read. On a device
+         * that reads as a bug: tap a panel, and the ring lands on the next panel's
+         * text. The tapped line got only a "♪" beside its speaker, while the ring -
+         * a 2dp coloured border around the whole row - had already moved on, so the
+         * strongest thing on screen pointed at the wrong line.
+         *
+         * The cost is that Auto mode no longer previews the coming line. That was
+         * deliberate once, but it is the same visual as the bug, and following the
+         * reading is what makes the ring mean one thing in both modes.
+         *
+         * [PlaybackState.Idle] still separates a page nothing has played yet (ring
+         * the first line) from one whose first line has just finished (ring the
+         * second): without it a fresh page would point past the line it wants the
+         * child to start on, because [current] already reads 0.
          *
          * Derived, not stored, for the same reason as [lines]: a second copy could
          * disagree with the playback state it is supposed to describe.
          */
-        val nextLine: Int? get() {
+        val focusLine: Int? get() {
             val candidate = when {
-                playingIndex != null -> playingIndex + 1
+                playingIndex != null -> playingIndex
                 playback == PlaybackState.Idle -> 0
                 else -> current + 1
             }
