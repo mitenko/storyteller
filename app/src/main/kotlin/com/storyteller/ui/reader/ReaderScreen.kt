@@ -109,7 +109,7 @@ fun ReaderContent(
                         .testTag(NEXT_PAGE_FAB_TEST_TAG),
                 ) {
                     Icon(
-                        painter = painterResource(R.drawable.ic_photo_camera),
+                        painter = painterResource(R.drawable.ic_arrow_forward),
                         contentDescription = "Read the next page",
                     )
                 }
@@ -222,11 +222,11 @@ private fun ReaderFrame(
     Scaffold(
         topBar = { TopAppBar(title = { Text("Storyteller") }) },
         floatingActionButton = floatingActionButton,
-        // Lower LEFT, not the conventional right: a child holds a phone in both
-        // hands to look at a picture book, and the right thumb is the one that
-        // brushes the screen while scrolling. It is also well clear of the line
-        // rows, which is where every other tap on this screen lands.
-        floatingActionButtonPosition = FabPosition.Start,
+        // Lower right, the conventional corner. This was Start for a while, on the
+        // argument that a child holds a phone two-handed and the right thumb brushes
+        // the screen while scrolling - but seen on a device it read as misplaced,
+        // and an unfamiliar corner costs more than the stray touch it avoided.
+        floatingActionButtonPosition = FabPosition.End,
     ) { padding ->
         content(padding)
     }
