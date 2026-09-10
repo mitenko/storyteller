@@ -104,9 +104,23 @@ fun pageInstruction(width: Int, height: Int): String = """
 
     For each unit:
     - Set speaker to the character who says it. Use "Narrator" for description or
-      narration not attributed to a character. If you cannot tell who is speaking,
-      use "Narrator".
-    - Use the character's name exactly as it appears on the page.
+      narration not attributed to a character, and for sound effects. If you cannot
+      tell who is speaking, use "Narrator".
+    - Work out WHO is speaking from the balloon's tail - the pointer joining the
+      balloon to its speaker - and from who is drawn mid-speech. The name a line
+      ADDRESSES is not the speaker: in "Buy me more time, Duncan.", the speaker is
+      the person talking TO Duncan, never Duncan. On these pages the only printed
+      names are often the ones being addressed, so a name inside the text is
+      evidence about who is listening, not about who is talking.
+    - Use a character's own name when the page gives it. When it does not, describe
+      them so they cannot be confused with anyone else on the page - "the bearded
+      old man", "the fox", "the boy in the green shirt". Never use an
+      interchangeable label such as "Character", "Unknown Character", "Man" or
+      "Person": two different characters must never receive the same speaker
+      string, and the same character should read the same way on every line.
+    - Return sound effects and lettering that is spoken aloud - PAF!, FOOMP! - as
+      units with speaker "Narrator". Do not drop a line because no character speaks
+      it. A line that is missing is never read to the child at all.
     - Reproduce the text verbatim. Do not merge units, split units, translate, or
       correct spelling.
     - Set bounds to the box enclosing that unit's speech bubble, as absolute pixel

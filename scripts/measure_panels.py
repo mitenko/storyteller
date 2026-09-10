@@ -82,7 +82,11 @@ def units_live(bundle, width, height):
 
     jpeg = open(os.path.join(bundle, "page-upload.jpg"), "rb").read()
     payload = {
-        "model": model, "max_tokens": 3000,
+        # Matches PageReaderImpl.MAX_TOKENS. At 3000 this harness measured a
+        # limit the app does not have: the speaker guard drives thinking past
+        # 7000 tokens on a busy page, and the truncated JSON looked like a
+        # model failure rather than a budget one.
+        "model": model, "max_tokens": 8192,
         "output_config": {"format": {"type": "json_schema", "schema": schema}},
         "messages": [{"role": "user", "content": [
             {"type": "image",

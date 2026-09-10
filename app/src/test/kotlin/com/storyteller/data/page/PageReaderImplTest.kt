@@ -245,7 +245,7 @@ class PageReaderImplTest {
         assertNull(hit[0].bounds)
     }
 
-    @Test fun `does not ask the model for characters`() {
+    @Test fun `asks the model for characters`() {
         val schema = PAGE_SCHEMA.toString()
 
         assertTrue("characters should be requested to improve attribution", schema.contains("characters"))
@@ -513,6 +513,63 @@ class PageReaderImplTest {
             "a panel that excludes its balloon is not that balloon's panel",
             reader().read(pageImage()).getOrThrow().units[0].panel,
         )
+    }
+
+    /**
+     * The measured failure: "BUY ME MORE TIME, DUNCAN." came back attributed to
+     * Duncan, and "ALY, BEFORE WE GO ANY FURTHER..." to Aly. On a comics page the
+     * only printed names are often the ones being ADDRESSED, and the prompt used to
+     * say "use the character's name exactly as it appears on the page", which
+     * invites exactly that. 2/15 vocative lines were misattributed before this
+     * paragraph; 0/15 after. See docs/issues/2026-09-08-speaker-attribution-measured.md.
+     *
+     * This pins the instruction, not the model's behaviour - no MockWebServer test
+     * can prove what the model does with it. The offline measurement is what proves
+     * that, and it is rerun when this prompt changes.
+     */
+    @Test fun `the prompt warns that a line's addressee is not its speaker`() {
+        val i = pageInstruction(893, 1372)
+        assertTrue("must name the trap", i.contains("address", ignoreCase = true))
+        assertTrue("must point at the balloon tail as the evidence", i.contains("tail", ignoreCase = true))
+    }
+
+    /**
+     * The guard drafted during the measurement dropped every PAF! and FOOMP! on the
+     * page - 14 units across the run - because it pushed the model to find a real
+     * speaker and it dropped the lines that had none. A dropped line is worse than a
+     * wrongly-voiced one: the child never hears it at all.
+     */
+    @Test fun `the prompt keeps sound effects rather than dropping them`() {
+        val i = pageInstruction(893, 1372)
+        assertTrue("must mention sound effects", i.contains("sound effect", ignoreCase = true))
+        assertTrue("must route them to the narrator", i.contains("Narrator"))
+    }
+
+    /**
+     * `Character`, `Unknown Character`, `Man`, `Boy` - measured 8 such labels across
+     * three pages. Two characters handed the same string share a voice, which a
+     * child hears immediately.
+     */
+    @Test fun `the prompt forbids speaker labels that cannot tell two characters apart`() {
+        val i = pageInstruction(893, 1372)
+        assertTrue("must forbid the placeholder labels", i.contains("Unknown Character"))
+        assertTrue("must demand distinctness", i.contains("distinct", ignoreCase = true))
+    }
+
+    /**
+     * The client half of the sound-effect guarantee. The prompt asking for it is
+     * one thing; this proves a Narrator unit carrying a sound effect actually
+     * survives the parse rather than being filtered on its way to the reader.
+     */
+    @Test fun `a narrator sound effect survives the parse`() = runTest {
+        enqueueTextBlock(
+            """{"units":[{"speaker":"Narrator","text":"PAF!","bounds":null,"panel":null}],"characters":[]}""",
+        )
+        val units = reader().read(pageImage()).getOrThrow().units
+
+        assertEquals(1, units.size)
+        assertEquals("Narrator", units[0].speaker)
+        assertEquals("PAF!", units[0].text)
     }
 
     @Test fun `the prompt asks for the panel in pixels`() {
