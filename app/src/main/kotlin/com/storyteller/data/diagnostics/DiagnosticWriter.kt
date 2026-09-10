@@ -165,10 +165,18 @@ class DiagnosticWriterImpl(private val root: File) : DiagnosticWriter {
     private fun parseJson(parsed: ParsedPage): String {
         val units = parsed.units.joinToString(",\n") { u ->
             """    {"index": ${u.index}, "speaker": ${quote(u.speaker)}, """ +
+                """"characterId": ${u.characterId?.let(::quote) ?: "null"}, """ +
                 """"text": ${quote(u.text)}, "bounds": ${boxJson(u.bounds)}, """ +
                 """"panel": ${boxJson(u.panel)}}"""
         }
-        return "{\n  \"units\": [\n$units\n  ]\n}"
+        // The roster is recorded even when empty. A page whose cast came back
+        // empty and a page whose roster this function forgot look identical
+        // otherwise, and telling those apart is the entire point of the bundle.
+        val characters = parsed.characters.joinToString(",\n") { c ->
+            """    {"id": ${quote(c.id)}, "name": ${quote(c.name)}, """ +
+                """"description": ${quote(c.description)}}"""
+        }
+        return "{\n  \"units\": [\n$units\n  ],\n  \"characters\": [\n$characters\n  ]\n}"
     }
 
     private fun boxJson(b: BoundingBox?): String =

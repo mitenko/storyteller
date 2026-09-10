@@ -13,7 +13,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         VoiceListEntity::class,
         SettingEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 abstract class StorytellerDatabase : RoomDatabase() {
@@ -55,5 +55,31 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
         )
         db.execSQL("DROP TABLE `character_voice`")
         db.execSQL("ALTER TABLE `character_voice_new` RENAME TO `character_voice`")
+    }
+}
+
+/**
+ * Clears every remembered voice. The table keeps its shape; what changed is the
+ * meaning of its key.
+ *
+ * `character_voice` was keyed on whatever string the model typed for the speaker.
+ * Measured on 2026-09-10, that string drifts between reads of one page - the same
+ * rabbit arrived as "the pink rabbit with a bandaged ear", then "with long floppy
+ * ears", then "the pink rabbit-like creature" - so the table had accumulated rows
+ * that are several voices for one character, and single rows shared by two
+ * characters where the model reused a label like "Man".
+ *
+ * It is now keyed on `characterKey`: the page's own name where there is one, the
+ * speaker label otherwise, normalised. Old rows cannot be mapped onto that
+ * reliably - deciding which of three rabbit rows was "the" rabbit is guesswork,
+ * and guessing wrong is permanent, because first write wins.
+ *
+ * So they go. The cost is one re-randomised voice per character on the next read,
+ * which is the same thing that happens on any first read. The alternative is
+ * carrying a corrupt map forward for ever.
+ */
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("DELETE FROM character_voice")
     }
 }

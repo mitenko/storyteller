@@ -3,6 +3,7 @@ package com.storyteller.domain
 import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.ParsedPage
 import com.storyteller.domain.model.SpeechUnit
+import com.storyteller.domain.model.characterKey
 import com.storyteller.domain.repository.AudioRepository
 import com.storyteller.domain.repository.PageReader
 import com.storyteller.domain.repository.VoiceRepository
@@ -11,8 +12,23 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
 
+/**
+ * [voiceKey] is resolved from [speaker] the same way `toSpeechUnits` does it in
+ * production, so a unit built here looks up the same voice a real one would.
+ *
+ * Note the key is NORMALISED - "Wolf" keys as "wolf" - so a fake that fails for a
+ * character must name the key, not the display string. Leaving this null instead
+ * would send every unit to the narrator's voice and quietly disarm any test that
+ * expects a per-character lookup.
+ */
 fun speechUnit(index: Int, speaker: String = "Wolf", text: String = "line $index") =
-    SpeechUnit(index = index, speaker = speaker, text = text, bounds = null)
+    SpeechUnit(
+        index = index,
+        speaker = speaker,
+        text = text,
+        bounds = null,
+        voiceKey = characterKey(name = "", label = speaker),
+    )
 
 /**
  * The bytes are not a decodable JPEG and do not need to be — nothing in the read

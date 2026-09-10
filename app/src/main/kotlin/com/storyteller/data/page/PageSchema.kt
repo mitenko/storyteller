@@ -26,6 +26,9 @@ val PAGE_SCHEMA: JsonObject = Json.parseToJsonElement(
             "type": "object",
             "properties": {
               "speaker": { "type": "string" },
+              "characterId": {
+                "anyOf": [ { "type": "string" }, { "type": "null" } ]
+              },
               "text": { "type": "string" },
               "bounds": {
                 "anyOf": [
@@ -60,7 +63,7 @@ val PAGE_SCHEMA: JsonObject = Json.parseToJsonElement(
                 ]
               }
             },
-            "required": ["speaker", "text", "bounds", "panel"],
+            "required": ["speaker", "characterId", "text", "bounds", "panel"],
             "additionalProperties": false
           }
         },
@@ -69,9 +72,11 @@ val PAGE_SCHEMA: JsonObject = Json.parseToJsonElement(
           "items": {
             "type": "object",
             "properties": {
-              "name": { "type": "string" }
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "description": { "type": "string" }
             },
-            "required": ["name"],
+            "required": ["id", "name", "description"],
             "additionalProperties": false
           }
         }
@@ -136,7 +141,16 @@ fun pageInstruction(width: Int, height: Int): String = """
 
     Also return characters: one entry per distinct character who speaks on this
     page. Do not include the narrator.
-    - Set name to exactly the speaker string you used in units.
+    - Set id to a short tag unique within this page: "c1", "c2", "c3".
+    - Set name to the character's own name if the page gives one, and to an empty
+      string if it does not. Do not put a description in name.
+    - Set description to what tells this character apart from everyone else on the
+      page - "the bearded old man", "the fox", "the boy in the green shirt" - even
+      when you also know their name.
+    - Two characters who look alike still get two entries with two ids. Never merge
+      them because you described them the same way.
+    - Then set each unit's characterId to the id of whoever speaks it, and to null
+      for narration and sound effects. Every characterId must appear in this list.
 
     Ignore page numbers, running heads, publisher marks, and any text that is part
     of the artwork rather than something to be read aloud.
