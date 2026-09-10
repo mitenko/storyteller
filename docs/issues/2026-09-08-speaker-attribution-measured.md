@@ -349,3 +349,84 @@ than reused for current planning.
 3. Add book-level identity reconciliation only after page-level IDs are reliable.
 4. Add panel-scoped `speakerId` and location only when a UI feature consumes the
    position and the reject-don't-invent gate is demonstrably safe.
+
+---
+
+## 21. The prompt fix shipped, and measured better than the spike predicted
+
+2026-09-10. The guard is now in `pageInstruction` (M1). Re-measured on the same
+three bundles, same hand labels, three repeats, so the numbers below are directly
+comparable to §3.
+
+| metric | old prompt | spike's draft guard | shipped |
+|---|---|---|---|
+| accuracy | 69% | 81% | **91%** |
+| generic placeholders | 8 | 0 | **0** |
+| dropped sound effects | 0 | **14** | **0** |
+| genuine vocative errors | 2/15 | 0/15 | **1/15** |
+| name collisions | 10 | 6 | **4** |
+
+Better than either arm the spike tested. The Duncan and Aly traps are gone
+outright: `BUY ME MORE TIME, DUNCAN.` returns "the bearded old man" on all three
+repeats, and "Aly" never appears as a speaker.
+
+### 21.1 Two things §7 got wrong
+
+**The cost warning does not apply to what shipped.** §6 recorded the guard tripling
+cost by driving 3,600-7,230 thinking tokens. The shipped wording spends **zero**
+thinking tokens on all nine calls, with a maximum of 1095 output against a budget
+of 8192 — 7,097 spare. Roughly $0.026 a page, against $0.021 before. Two prompts
+aimed at the same behaviour had entirely different cost profiles, which is worth
+remembering before quoting a token figure for "a guard" in the abstract.
+
+**So `MAX_TOKENS` needed no raise.** §7 called for re-sizing it alongside the
+guard. Measured, there was nothing to re-size.
+
+### 21.2 A clause that made the primary bug five times worse
+
+The run left one visible defect: `the pink rabbit (Cogsley)` — the right speaker
+with the addressee annotated after it. Harmless as attribution and harmful as data,
+because that string is a voice-map key, so one rabbit becomes two rows and two
+voices.
+
+A clause was added forbidding appended notes. It backfired, measured on the same
+three pages:
+
+| | without the clause | with it |
+|---|---|---|
+| accuracy | **91%** | 88% |
+| genuine vocative errors | **1/15** | **5/15** |
+| collisions | **4** | 7 |
+
+Forbidding the parenthetical made the model drop the **description** and keep the
+**annotation** — "the pink rabbit (Cogsley)" collapsed to a bare "Cogsley", which
+is precisely the error the whole paragraph exists to prevent. Reverted.
+
+The lesson is narrow and worth stating: a prompt clause aimed at a small defect
+moved the primary metric five times in the wrong direction, and no amount of
+reading the wording would have predicted it. Prompt changes here are measured or
+they are guesses.
+
+The parenthetical remains, twice in nine calls. It is a **stability** defect rather
+than an attribution one, and the roster in `docs/BACKLOG.md` M2 is the right fix:
+one resolved identity per character, so the spelling of the label stops being what
+the voice map is keyed on.
+
+### 21.3 The measurement had a bug too
+
+The first reading of this run reported 3/15 vocative errors. Two of those were the
+scorer counting `the pink rabbit (Cogsley)` as a claim that Cogsley speaks, when it
+names the rabbit and merely mentions the addressee. `claims_speaker_is` now strips
+parenthesised text before matching, and both runs above were re-scored under the
+corrected metric before being compared.
+
+Worth recording because §13.3 made the same kind of error in the other direction:
+the instrument is as capable of being wrong as the thing it measures, and a
+comparison across a metric change is not a comparison.
+
+### 21.4 What is still open
+
+Instability is untouched: 12 lines of 69 return a different speaker string between
+repeats — "the boy with brown hair" one run, "the boy in the green shirt" the next.
+Same character, two keys, two voices. Prompt wording cannot fix it, and M2 is where
+it goes.
