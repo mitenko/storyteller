@@ -343,8 +343,8 @@ five separate stalls later.
 | id | decision | what it blocks |
 |---|---|---|
 | D1 | Roster scope: per page, or per book | Shapes M2.4, M3.8, M8.2 |
-| D2 | Page identity: perceptual hash, or manual entry | Picks M7.1-7.2 or M7.3-7.4 |
-| D3 | At a fourth book: refuse, or evict least-recently-read | Shapes M6.5 and M8.6 |
+| D2 | Page identity: perceptual hash, or manual entry | Picks M7A or M7B |
+| D3 | At a fourth book: refuse, or evict least-recently-read | Shapes M6B.2 and M8.6 |
 | D4 | Word timing: ElevenLabs alignment, or estimate from characters | Changes all of M4 |
 | D5 | Audition line: fixed sample, page's shortest line, or the line in hand | Sets the cost of M3.7 |
 
@@ -370,59 +370,87 @@ effects.
 
 ## M2 — Character roster (the hinge; unblocks M3, and #8 and #11 later)
 
+The ID must be stable beyond one model response. A generated `character_1` is
+only response-local unless it is persisted with the page or reconciled against
+an existing roster. Raw model labels remain diagnostic; voice assignments use
+the persisted roster ID. This contract is part of M2, not an implementation
+detail.
+
 | id | task | size |
 |---|---|---|
 | M2.1 | Parse `characters` into `PageDto` instead of discarding it | XS |
-| M2.2 | Add a stable id and a distinguishing description per entry | S |
-| M2.3 | Carry the roster on `ParsedPage` through the domain | S |
-| M2.4 | Resolve each unit's `speaker` to a roster id at parse time | S |
-| M2.5 | Keep the raw string beside the id, for display and debugging | XS |
-| M2.6 | Re-key `character_voice` on roster id | S |
-| M2.7 | Room migration v4 to v5; drop unsalvageable free-string rows | S |
-| M2.8 | Test: one page read twice yields the same ids | S |
-| M2.9 | Test: two characters never collapse to one id | S |
-| M2.10 | Test: the migration drops old rows without failing on open | S |
+| M2.2 | Define roster-ID lifetime: persist per page and reconcile before creating a new id | S |
+| M2.3 | Add a stable id and a distinguishing description per entry | S |
+| M2.4 | Carry the roster on `ParsedPage` through the domain | S |
+| M2.5 | Resolve each unit's `speaker` to a roster id at parse time | S |
+| M2.6 | Keep the raw string beside the id, for display and debugging | XS |
+| M2.7 | Test: one page read twice yields the same ids | S |
+| M2.8 | Test: two characters never collapse to one id | S |
+| M2.9 | Re-key `character_voice` on roster id | S |
+| M2.10 | Room migration v4 to v5; drop unsalvageable free-string rows | S |
+| M2.11 | Test: the migration drops old rows without failing on open | S |
 
-**Done when** reading one page twice assigns the same voices both times.
+**Done when** reading one page twice resolves the same roster identities and
+assigns the same voices both times. Do not migrate the voice table before the
+ID and repeated-read tests pass; otherwise persistence can make a bad identity
+decision permanent.
 
 ## M3 — Voice picker (needs M2)
+
+Split the picker into identity-safe selection first and audio refresh second.
+The first part is useful once M2 is complete; whole-page re-synthesis should
+wait until stored-page ownership exists so changed audio has a durable home.
 
 | id | task | size |
 |---|---|---|
 | M3.1 | Store voice **names** alongside ids in `voice_list` | S |
 | M3.2 | Choose the audition line per D5 | XS |
 | M3.3 | Synthesise and cache one audition clip per candidate voice | S |
-| M3.4 | Picker route, and an entry point from the reader | S |
-| M3.5 | Picker UI: this page's characters, each with its current voice | S |
+| M3.4 | Picker route and entry point from the reader | S |
+| M3.5 | Picker UI: this page's characters and current voice | S |
 | M3.6 | Play a candidate on tap | S |
 | M3.7 | Compare several voices back to back on one line | S |
 | M3.8 | Write the choice through, overriding the random assignment | S |
-| M3.9 | Re-request audio for lines whose voice changed | S |
-| M3.10 | Test: a chosen voice survives a re-read | S |
-| M3.11 | Test: choosing does not re-synthesise unchanged lines | S |
+| M3.9 | Test: a chosen voice survives a re-read | S |
+| M3.10 | Test: choosing does not re-synthesise unchanged lines | S |
+| M3.11 | Re-request audio for lines whose voice changed, after M5 | S |
 
 **Done when** a disliked voice can be changed and stays changed.
 
-## M4 — Bold the word as it is read (unblocked; the most visible item here)
+## M4A — Word timing data (part of bold-as-read)
+
+Timing persistence is independent of playback sampling. Finish this slice before
+changing the player so cached audio has a defined timing contract.
 
 | id | task | size |
 |---|---|---|
-| M4.1 | Position sampler in `PagePlayerImpl`, every 50-100ms while playing | S |
-| M4.2 | Stop the sampler on pause, on background, and on dispose | S |
-| M4.3 | Carry elapsed-within-unit on the playback state | S |
-| M4.4 | Map position to a unit via `playlistUnits`, not the playlist index | S |
-| M4.5 | Obtain per-word timings per D4 | S |
-| M4.6 | Persist timings beside the audio: a `cached_audio` column, or a sidecar | S |
-| M4.7 | Pure function: elapsed plus timings gives a word index | XS |
-| M4.8 | Estimator fallback: split the duration by character count | S |
-| M4.9 | Add the word-index parameter to `LineText`, which its KDoc reserved | XS |
-| M4.10 | Render the accent | S |
-| M4.11 | Degrade silently when a cached clip has no timings | S |
-| M4.12 | Test: the word index tracks elapsed, and is null without timings | S |
-| M4.13 | Test: the sampler stops when playback does | S |
+| M4A.1 | Obtain per-word timings per D4 | S |
+| M4A.2 | Persist timings beside the audio: column or sidecar | S |
+| M4A.3 | Estimator fallback: split duration by character count | S |
+| M4A.4 | Degrade cleanly when cached audio has no timings | S |
+| M4A.5 | Test timing serialization and estimator fallback | S |
 
-**Done when** a child can follow the words on a real page and the phone does not
-get warm.
+## M4B — Playback position (part of bold-as-read)
+
+| id | task | size |
+|---|---|---|
+| M4B.1 | Position sampler in `PagePlayerImpl`, every 50-100ms while playing | S |
+| M4B.2 | Stop the sampler on pause, background, and dispose | S |
+| M4B.3 | Carry elapsed-within-unit on playback state | S |
+| M4B.4 | Map position through `ReaderViewModel.playlistUnits`, not playlist index | S |
+| M4B.5 | Test sampler lifecycle and unit mapping | S |
+
+## M4C — Word highlight UI (part of bold-as-read)
+
+| id | task | size |
+|---|---|---|
+| M4C.1 | Pure function: elapsed plus timings gives a word index | XS |
+| M4C.2 | Add word-index parameter to `LineText` | XS |
+| M4C.3 | Render the accent | S |
+| M4C.4 | Test the accented index and null fallback | S |
+
+**Done when** a child can follow the words on a real page, cached audio without
+timings still plays, and the phone does not get warm.
 
 ## M5 — Stored pages
 
@@ -440,26 +468,44 @@ get warm.
 
 **Done when** a page read yesterday reopens instantly and for nothing.
 
-## M6 — Storage limits (before three books make it urgent)
+## M6A — Storage limits for loose pages
 
 | id | task | size |
 |---|---|---|
 | M6.1 | Measure real audio bytes per page on the device | XS |
 | M6.2 | A configurable size ceiling | S |
 | M6.3 | LRU eviction over loose audio and photos | S |
-| M6.4 | Never evict inside a stored book | S |
-| M6.5 | Behaviour at the ceiling, per D3 | S |
-| M6.6 | Test: eviction never breaks a stored book | S |
+| M6.4 | Define atomic cleanup of a page record, photo, and owned audio | S |
+| M6.5 | Test loose-page eviction and cleanup | S |
 
-## M7 — Page and book identity
+## M6B — Book-protected storage
+
+Book protection cannot be implemented before page membership exists. It is a
+follow-up to M8, not a hidden prerequisite of the first storage-cap slice.
 
 | id | task | size |
 |---|---|---|
-| M7.1 | Manual "which book, which page" at capture, if D2 is manual | S |
-| M7.2 | Page ordering within a book | S |
-| M7.3 | Perceptual page key tolerant of angle and exposure, if D2 is auto | S |
-| M7.4 | Match a re-photographed page to its stored record | S |
-| M7.5 | Test: the same page photographed twice resolves to one record | S |
+| M6B.1 | Never evict assets belonging to a stored book | S |
+| M6B.2 | Define behaviour at the ceiling per D3 | S |
+| M6B.3 | Test eviction never breaks a stored book | S |
+
+## M7A — Page metadata
+
+| id | task | size |
+|---|---|---|
+| M7A.1 | Store optional manual page number at capture | S |
+| M7A.2 | Test page-number editing and display | S |
+
+## M7B — Automatic page identity (optional)
+
+Automatic matching is separate from manual book assignment. It is not required
+for a useful personal-build library.
+
+| id | task | size |
+|---|---|---|
+| M7B.1 | Perceptual page key tolerant of angle and exposure, if D2 is auto | S |
+| M7B.2 | Match a re-photographed page to its stored record | S |
+| M7B.3 | Test the same page photographed twice resolves to one record | S |
 
 ## M8 — Books, up to three
 
@@ -469,7 +515,7 @@ get warm.
 | M8.2 | Scope `character_voice` to a book | S |
 | M8.3 | Migration for both | S |
 | M8.4 | Bookshelf route and list | S |
-| M8.5 | Assign a captured page to a book | S |
+| M8.5 | Assign a stored page to a book | S |
 | M8.6 | Enforce the cap, per D3 | S |
 | M8.7 | Test: identical placeholder names in two books keep separate voices | S |
 
@@ -498,32 +544,46 @@ One line each. None of it blocks anything above; pull one forward on appetite.
 
 # Order
 
-**M0 → M1 → G → M4 → M2 → M3 → M5 → M6 → M7 → M8 → M9**
+The order has two tracks because hardware is currently a conditional dependency:
+
+- **Hardware available:** `M0 → G → M1 → M2 → M4A → M4B → M4C → M5 → M3 → M6A → M8 → M6B → M7 → M9`
+- **Hardware unavailable:** `M0 → M1 → M2 → M4A → M4B → M4C → M5 → M3 → M6A → M8 → M6B → M7 → M9`, with `G` run at the first opportunity.
 
 Where the reasoning is not obvious:
 
 **M0 first.** Five decisions cost an hour together, and each one left open stalls a
 milestone later.
 
-**M1 next.** Nine tasks, six of them XS, and the only work here with a measured gain
-already attached: 69% to 81%. Everything downstream gets better speaker names for
-free.
+**G is conditional but urgent.** The walkthrough is the cheapest way to discover
+capture, API, synthesis, and reader failures; it should not wait for documentation
+or code work if a real device is available. If hardware is blocked, M1 is still
+safe to do because it is covered by offline measurements and MockWebServer tests.
 
-**The walkthrough as soon as hardware allows**, wherever it falls. Three of the four
-bugs fixed in PR #4 were found within minutes on a real device, having survived 299
-passing tests. That is the cheapest bug-per-hour rate on this list.
+**M1 next on the code track.** It is nine small tasks and the only work with a
+measured gain already attached: 69% to 81%. It also prevents bad speaker labels
+from becoming durable data later.
 
-**M4 before M2, reversing the earlier draft.** The case for roster-first was that it
-unblocks the most. The case against is that it unblocks nothing a child can see: M2
-and M3 together are 21 tasks before anyone hears a different voice, while M4 is
-visible the moment it works and blocks nothing. It is also the change most likely to
-alter how the app feels, which is worth learning early rather than after four
-milestones of plumbing.
+**M2 before persistence.** The roster is nearly free because the schema already
+requests it, but stable-ID lifetime must be proven before migrating
+`character_voice`. Otherwise the first persistent implementation can turn model
+drift into a permanent wrong voice.
 
-**M2 before M3 is not negotiable.** A picker built on unstable identity lets a child
-fix a voice and then watch it come undone on the next page.
+**M4 is split into three visible slices.** Timing storage, playback sampling, and
+highlight rendering touch different subsystems and can fail independently. Keeping
+them separate makes each change reviewable and ensures cached audio without timing
+data has an explicit fallback.
 
-**M5, then M6, then M8.** Pages before limits before books: a cap is meaningless with
-nothing stored, and a book is a pile of stored pages.
+**M5 before M3's full refresh path.** A picker can audition and persist a choice
+after M2, but re-synthesizing all affected lines needs stored-page ownership. This
+prevents changed audio from being orphaned or tied only to an in-memory reader.
+
+**M6A precedes M8; M6B follows it.** Measuring bytes and evicting loose pages needs
+no book model. Protecting book assets does, so that rule belongs after M8 rather
+than pretending M6 is fully complete beforehand.
+
+**M7 is manual-first and optional beyond that.** Manual page metadata and book
+assignment are enough for a personal build. Perceptual matching is a separate
+experiment and should not block books unless re-photograph recognition proves
+essential.
 
 **M9 last, and possibly never.** Nothing above depends on any of it.
