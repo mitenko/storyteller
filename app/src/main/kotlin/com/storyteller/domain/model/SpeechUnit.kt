@@ -16,6 +16,27 @@ fun BoundingBox.contains(other: BoundingBox, tolerance: Float = 0.01f): Boolean 
     other.left >= left - tolerance && other.top >= top - tolerance &&
         other.right <= right + tolerance && other.bottom <= bottom + tolerance
 
+/**
+ * One character on a page, as the model resolved them.
+ *
+ * [id] is response-local - "c1", "c2" - and is NOT durable on its own. It makes
+ * two characters distinguishable within one parse, which free-text speaker strings
+ * could not: two characters the model described identically collapsed into one
+ * voice. Turning it into a lasting identity is reconciliation's job, and lives
+ * outside this type.
+ *
+ * [name] is empty when the page never names the character. [description] is what
+ * tells them apart when it does not - "the bearded old man", "the fox".
+ */
+data class PageCharacter(
+    val id: String,
+    val name: String,
+    val description: String,
+) {
+    /** What to show a human: the page's own name where there is one. */
+    val label: String get() = name.ifBlank { description }
+}
+
 /** What the model returns, before reading-order indices are assigned. */
 data class ParsedUnit(
     val speaker: String,
@@ -23,10 +44,22 @@ data class ParsedUnit(
     val bounds: BoundingBox?,
     /** The comic panel this unit sits in, or null when none was resolved. */
     val panel: BoundingBox? = null,
+    /**
+     * Which [PageCharacter] said it, or null for narration and sound effects.
+     *
+     * Last in the list, and optional, for the same reason [panel] is: the existing
+     * positional construction across the test suite keeps compiling.
+     */
+    val characterId: String? = null,
 )
 
 data class SpeechUnit(
     val index: Int,
+    /**
+     * The label to SHOW for this line. Kept beside [characterId] deliberately: it
+     * is what the reader prints above a line and what makes a diagnostic bundle
+     * legible. Only the voice lookup moves to the id.
+     */
     val speaker: String,
     val text: String,
     val bounds: BoundingBox?,
@@ -37,6 +70,23 @@ data class SpeechUnit(
      * the lettering they cannot read, where the panel shows them the picture.
      */
     val panel: BoundingBox? = null,
+    /**
+     * The [PageCharacter] who said this, or null for narration, sound effects, and
+     * any unit whose id was not in the page's roster.
+     *
+     * A dangling id is dropped rather than carried: it would miss the voice map
+     * silently and earn the line a fresh random voice, which is the failure this
+     * whole milestone exists to remove.
+     */
+    val characterId: String? = null,
+    /**
+     * The key this line's voice is remembered under - see [characterKey].
+     *
+     * Null for narration and sound effects, which share the narrator's voice
+     * rather than a character's. Resolved at parse time, where the roster is in
+     * hand, so the voice lookup never has to go looking for it.
+     */
+    val voiceKey: String? = null,
 )
 
 data class PreparedUnit(val unit: SpeechUnit, val voiceId: String, val audio: File)
@@ -50,17 +100,38 @@ const val NARRATOR = "Narrator"
  * Indices come from position AFTER dropping, so they stay contiguous and can be
  * used directly as playlist positions.
  */
-fun List<ParsedUnit>.toSpeechUnits(): List<SpeechUnit> =
-    filter { it.text.isNotBlank() }
+fun List<ParsedUnit>.toSpeechUnits(characters: List<PageCharacter> = emptyList()): List<SpeechUnit> {
+    val byId = characters.associateBy { it.id }
+    return filter { it.text.isNotBlank() }
         .mapIndexed { i, p ->
+            val speaker = p.speaker.trim().ifBlank { NARRATOR }
+            // Reject-don't-invent, applied to identity: an id the roster does not
+            // contain is a model error, and keeping it would let the voice lookup
+            // miss without anyone noticing.
+            val character = p.characterId?.takeIf { it.isNotBlank() }?.let { byId[it] }
             SpeechUnit(
                 index = i,
-                speaker = p.speaker.trim().ifBlank { NARRATOR },
+                speaker = speaker,
                 text = p.text.trim(),
                 bounds = p.bounds,
                 panel = p.panel,
+                characterId = character?.id,
+                // The page's own NAME when it has one, the label otherwise. Never
+                // the description - see characterKey for the measurement that
+                // settled this.
+                voiceKey = characterKey(name = character?.name.orEmpty(), label = speaker),
             )
         }
+}
 
-/** One page's parse: what is said, in reading order. */
-data class ParsedPage(val units: List<SpeechUnit>)
+/**
+ * One page's parse: who is on it, and what is said, in reading order.
+ *
+ * [characters] defaults to empty so the many tests and call sites that only care
+ * about units keep compiling, and so a page of pure narration is representable
+ * without a fake cast.
+ */
+data class ParsedPage(
+    val units: List<SpeechUnit>,
+    val characters: List<PageCharacter> = emptyList(),
+)

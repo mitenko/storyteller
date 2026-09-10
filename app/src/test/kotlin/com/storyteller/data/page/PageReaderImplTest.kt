@@ -36,6 +36,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -527,6 +528,101 @@ class PageReaderImplTest {
      * can prove what the model does with it. The offline measurement is what proves
      * that, and it is rerun when this prompt changes.
      */
+    // --- M2: the character roster ---
+
+    /**
+     * The roster is what stops the voice map keying on a string that drifts. The
+     * field has always been requested and always been thrown away: PAGE_SCHEMA
+     * declares `characters`, marks it required, and `pageInstruction` asks for it,
+     * while PageDto declared only `units`. The model was billed to enumerate a cast
+     * nobody read.
+     */
+    @Test fun `the roster reaches the domain instead of being parsed away`() = runTest {
+        enqueueTextBlock(
+            """{"units":[{"speaker":"Cogsley","characterId":"c1","text":"GAH!","bounds":null,"panel":null}],
+                "characters":[{"id":"c1","name":"Cogsley","description":"the red and white robot"}]}""",
+        )
+        val page = reader().read(pageImage()).getOrThrow()
+
+        assertEquals(1, page.characters.size)
+        assertEquals("c1", page.characters[0].id)
+        assertEquals("Cogsley", page.characters[0].name)
+        assertEquals("the red and white robot", page.characters[0].description)
+    }
+
+    /**
+     * The point of the id. Two characters the model happens to describe with the
+     * same words must still be two characters - under free-text speakers they
+     * collapsed into one voice, which a child hears immediately. Measured at 4
+     * collisions across three pages even after the M1 prompt fix.
+     */
+    @Test fun `two characters sharing a description keep separate ids`() = runTest {
+        enqueueTextBlock(
+            """{"units":[
+                 {"speaker":"the man","characterId":"c1","text":"ONE","bounds":null,"panel":null},
+                 {"speaker":"the man","characterId":"c2","text":"TWO","bounds":null,"panel":null}],
+                "characters":[{"id":"c1","name":"","description":"the man"},
+                              {"id":"c2","name":"","description":"the man"}]}""",
+        )
+        val page = reader().read(pageImage()).getOrThrow()
+
+        assertEquals("c1", page.units[0].characterId)
+        assertEquals("c2", page.units[1].characterId)
+        assertNotEquals(page.units[0].characterId, page.units[1].characterId)
+    }
+
+    /**
+     * M2.6: the raw label stays. It is what the reader shows above a line and what
+     * makes a diagnostic bundle legible; only the VOICE lookup moves to the id.
+     */
+    @Test fun `the raw speaker string survives beside the id`() = runTest {
+        enqueueTextBlock(
+            """{"units":[{"speaker":"the bearded old man","characterId":"c1","text":"HM.","bounds":null,"panel":null}],
+                "characters":[{"id":"c1","name":"","description":"the bearded old man"}]}""",
+        )
+        val unit = reader().read(pageImage()).getOrThrow().units[0]
+
+        assertEquals("the bearded old man", unit.speaker)
+        assertEquals("c1", unit.characterId)
+    }
+
+    /**
+     * Narration has no character, and inventing one would put the narrator in the
+     * cast list and hand it a character voice.
+     */
+    @Test fun `a narrator line carries no character id`() = runTest {
+        enqueueTextBlock(
+            """{"units":[{"speaker":"Narrator","characterId":null,"text":"PAF!","bounds":null,"panel":null}],
+                "characters":[]}""",
+        )
+        val unit = reader().read(pageImage()).getOrThrow().units[0]
+
+        assertEquals("Narrator", unit.speaker)
+        assertNull(unit.characterId)
+    }
+
+    /**
+     * Reject-don't-invent, applied to identity. A unit pointing at a character the
+     * roster does not contain is a model error; keeping the dangling id would let a
+     * voice lookup miss silently and hand the line a fresh random voice.
+     */
+    @Test fun `a character id absent from the roster is dropped, not kept`() = runTest {
+        enqueueTextBlock(
+            """{"units":[{"speaker":"Ghost","characterId":"c9","text":"BOO","bounds":null,"panel":null}],
+                "characters":[{"id":"c1","name":"Cogsley","description":"a robot"}]}""",
+        )
+        val unit = reader().read(pageImage()).getOrThrow().units[0]
+
+        assertEquals("Ghost", unit.speaker)
+        assertNull("a dangling id must not reach the voice map", unit.characterId)
+    }
+
+    @Test fun `the prompt asks for a roster and for units to reference it`() {
+        val i = pageInstruction(893, 1372)
+        assertTrue("must ask for an id per character", i.contains("characterId"))
+        assertTrue("must ask for a description", i.contains("description", ignoreCase = true))
+    }
+
     @Test fun `the prompt warns that a line's addressee is not its speaker`() {
         val i = pageInstruction(893, 1372)
         assertTrue("must name the trap", i.contains("address", ignoreCase = true))

@@ -7,6 +7,7 @@ import com.storyteller.data.local.ParsedPageDao
 import com.storyteller.data.local.ParsedPageEntity
 import com.storyteller.data.sha256
 import com.storyteller.domain.model.BoundingBox
+import com.storyteller.domain.model.PageCharacter
 import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.ParsedPage
 import com.storyteller.domain.model.PAGE_VISION_MODEL
@@ -53,13 +54,29 @@ private data class BoundsDto(val x1: Float, val y1: Float, val x2: Float, val y2
 @Serializable
 private data class UnitDto(
     val speaker: String,
+    val characterId: String? = null,
     val text: String,
     val bounds: BoundsDto?,
     val panel: BoundsDto? = null,
 )
 
 @Serializable
-private data class PageDto(val units: List<UnitDto>)
+private data class CharacterDto(
+    val id: String,
+    val name: String = "",
+    val description: String = "",
+)
+
+/**
+ * [characters] defaults to empty so a cached payload written before the roster
+ * existed still decodes. PARSE_VERSION makes those rows stale anyway, but a parse
+ * that throws on old JSON would fail the read instead of quietly re-fetching.
+ */
+@Serializable
+private data class PageDto(
+    val units: List<UnitDto>,
+    val characters: List<CharacterDto> = emptyList(),
+)
 
 class PageReaderImpl(
     private val api: ClaudeApi,
@@ -270,18 +287,35 @@ class PageReaderImpl(
         return box
     }
 
-    private fun PageDto.toDomain(width: Int, height: Int): ParsedPage = ParsedPage(
-        units = units.map { u ->
-            val bounds = u.bounds?.toDomain(width, height)
-            ParsedUnit(
-                speaker = u.speaker,
-                text = u.text,
-                bounds = bounds,
-                panel = u.panel?.toPanel(width, height, bounds),
-            )
-        }.toSpeechUnits(),
-    )
+    private fun PageDto.toDomain(width: Int, height: Int): ParsedPage {
+        // Blank ids are dropped here rather than downstream: an empty id would
+        // match every unit that also failed to name one, quietly merging
+        // characters - the exact collapse the roster exists to prevent.
+        val roster = characters
+            .filter { it.id.isNotBlank() }
+            .map { PageCharacter(id = it.id, name = it.name.trim(), description = it.description.trim()) }
+        return ParsedPage(
+            units = units.map { u ->
+                val bounds = u.bounds?.toDomain(width, height)
+                ParsedUnit(
+                    speaker = u.speaker,
+                    characterId = u.characterId,
+                    text = u.text,
+                    bounds = bounds,
+                    panel = u.panel?.toPanel(width, height, bounds),
+                )
+            }.toSpeechUnits(characters = roster),
+            characters = roster,
+        )
+    }
 
+    /**
+     * `copy`, NOT a fresh `ParsedPage(units = ...)`. Constructing one here drops
+     * every field the constructor call does not mention, and it silently dropped
+     * the character roster the moment that field was added - the same
+     * fields-go-here-to-be-forgotten failure recorded for DiagnosticWriter.parseJson
+     * in section 20.1 of the bubble-box issue. `copy` cannot forget a field.
+     */
     private fun ParsedPage.applyLocalizer(localizer: PageLocalizer, image: PageImage): ParsedPage =
-        ParsedPage(units = localizer.localize(image, units))
+        copy(units = localizer.localize(image, units))
 }
