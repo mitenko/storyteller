@@ -6,6 +6,7 @@ import com.storyteller.domain.model.PlaybackState
 import com.storyteller.domain.model.PreparedUnit
 import com.storyteller.domain.model.ReadingMode
 import com.storyteller.domain.model.ThemeChoice
+import com.storyteller.domain.model.WordTiming
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
@@ -23,6 +24,15 @@ interface VoiceRepository {
 /** Returns a local audio file for the text in the given voice, synthesizing on a cache miss. */
 interface AudioRepository {
     suspend fun audioFor(text: String, voiceId: String): Result<File>
+
+    /**
+     * Word timings for a line already synthesised, or null when none were stored.
+     *
+     * Null is ordinary, not exceptional: every clip cached before timings existed
+     * answers null, and the caller falls back to estimating from the clip's
+     * duration rather than re-purchasing audio it already owns.
+     */
+    suspend fun timingsFor(text: String, voiceId: String): List<WordTiming>? = null
 }
 
 interface PagePlayer {
