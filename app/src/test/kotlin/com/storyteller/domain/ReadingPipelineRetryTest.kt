@@ -71,7 +71,7 @@ class ReadingPipelineRetryTest {
     @Test
     fun `voice lookup failure maps to Synthesis`() = runTest {
         val reader = FakePageReader(Result.success(listOf(speechUnit(0, speaker = "Wolf"))))
-        val voices = FakeVoiceRepository(fail = setOf("Wolf"))
+        val voices = FakeVoiceRepository(fail = setOf("wolf"))
         val p = ReadingPipelineImpl(reader, voices, FakeAudioRepository(), this)
 
         p.state.test {
@@ -97,7 +97,7 @@ class ReadingPipelineRetryTest {
         // Every unit shares the default "Wolf" speaker, so voice lookup fails
         // for all of them — but only after the page has already been parsed
         // and cached, so retry() takes the cached-parse branch, not a fresh read.
-        val voices = FakeVoiceRepository(fail = setOf("Wolf"))
+        val voices = FakeVoiceRepository(fail = setOf("wolf"))
         val p = ReadingPipelineImpl(reader, voices, FakeAudioRepository(), this)
         val image = pageImage()
 

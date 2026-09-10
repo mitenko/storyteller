@@ -1,6 +1,7 @@
 package com.storyteller.domain
 
 import com.storyteller.domain.model.FailureReason
+import com.storyteller.domain.model.NARRATOR
 import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.PipelineState
 import com.storyteller.domain.model.PreparedUnit
@@ -179,7 +180,13 @@ class ReadingPipelineImpl(
      * rethrown by `await()`, bypassing the `getOrElse` failure path entirely.
      */
     private suspend fun prepare(unit: SpeechUnit): Result<PreparedUnit> = try {
-        val voiceId = voices.voiceFor(unit.speaker).getOrElse { return Result.failure(it) }
+        // The reconciled key, NOT unit.speaker. The display string drifts between
+        // reads - "the pink rabbit with a bandaged ear" one time, "the pink
+        // rabbit-like creature" the next - and keying a voice on it gave one
+        // character several voices. Narration has no character and falls back to
+        // the narrator's own row, which is what it has always used.
+        val voiceId = voices.voiceFor(unit.voiceKey ?: NARRATOR)
+            .getOrElse { return Result.failure(it) }
         val file = audio.audioFor(unit.text, voiceId).getOrElse { return Result.failure(it) }
         Result.success(PreparedUnit(unit, voiceId, file))
     } catch (e: CancellationException) {

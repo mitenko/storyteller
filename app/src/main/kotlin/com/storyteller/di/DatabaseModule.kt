@@ -6,6 +6,7 @@ import com.storyteller.data.local.CachedAudioDao
 import com.storyteller.data.local.MIGRATION_1_2
 import com.storyteller.data.local.MIGRATION_2_3
 import com.storyteller.data.local.MIGRATION_3_4
+import com.storyteller.data.local.MIGRATION_4_5
 import com.storyteller.data.local.ParsedPageDao
 import com.storyteller.data.local.SettingsDao
 import com.storyteller.data.local.StorytellerDatabase
@@ -27,7 +28,7 @@ object DatabaseModule {
     @Provides @Singleton
     fun database(@ApplicationContext ctx: Context): StorytellerDatabase =
         Room.databaseBuilder(ctx, StorytellerDatabase::class.java, "storyteller.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
             .build()
 
     @Provides fun voiceDao(db: StorytellerDatabase): VoiceDao = db.voiceDao()
