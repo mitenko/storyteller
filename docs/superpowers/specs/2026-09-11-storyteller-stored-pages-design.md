@@ -36,9 +36,14 @@ exists rather than describing it as future work.
 The schema carries three decisions worth restating, because the rest depends on
 them:
 
-- **Keyed on the hash of the uploaded bytes** — the same key `parsed_page` uses,
-  so a stored page and its cached parse agree by construction rather than through
-  a foreign key someone must maintain.
+- **Keyed on `sha256` of the uploaded bytes.** An earlier draft of this spec said
+  this was "the same key `parsed_page` uses". It is not, and the difference is
+  deliberate: the parse cache keys on `sha256(image.bytes + PAGE_VISION_MODEL.id)`,
+  because changing the vision model must invalidate a cached parse. A stored page
+  must survive exactly that change — the transcript is what was read aloud to the
+  child — so the model id is correctly absent here, for the same reason
+  `parseVersion` is recorded but does not invalidate a row. The id only has to be
+  stable and unique per page image, and it is.
 - **No audio is copied.** Clips live in `cached_audio` keyed on
   `sha256(voiceId|text)`, and the persisted voice map resolves the same voice for
   the same character. Re-opening therefore resolves the same keys and hits the
