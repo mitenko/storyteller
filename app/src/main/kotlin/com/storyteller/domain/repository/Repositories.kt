@@ -5,6 +5,7 @@ import com.storyteller.domain.model.ParsedPage
 import com.storyteller.domain.model.PlaybackState
 import com.storyteller.domain.model.PreparedUnit
 import com.storyteller.domain.model.ReadingMode
+import com.storyteller.domain.model.StoredPage
 import com.storyteller.domain.model.ThemeChoice
 import com.storyteller.domain.model.WordTiming
 import kotlinx.coroutines.flow.Flow
@@ -75,4 +76,18 @@ interface SettingsRepository {
     suspend fun setMode(mode: ReadingMode)
     val theme: Flow<ThemeChoice>
     suspend fun setTheme(theme: ThemeChoice)
+}
+
+/** The pages a child has read, kept so they can be opened again for nothing. */
+interface StoredPageRepository {
+    /** Newest first. */
+    fun observeLibrary(): Flow<List<StoredPage>>
+
+    /** Stores [image]'s photograph and [units]; evicts the oldest page beyond the cap. */
+    suspend fun save(id: String, image: PageImage, units: List<PreparedUnit>)
+
+    suspend fun open(id: String): StoredPage?
+
+    /** Removes the row, its photograph, and any clip no other stored page needs. */
+    suspend fun delete(id: String)
 }
