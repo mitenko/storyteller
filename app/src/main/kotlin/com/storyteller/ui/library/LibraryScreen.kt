@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -20,10 +21,14 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
@@ -59,7 +64,12 @@ fun LibraryScreen(
     )
 }
 
-/** Stateless, so tests can drive it directly without Hilt or a real repository. */
+/**
+ * Stateless with respect to its caller - tests can drive it directly without
+ * Hilt or a real repository - but it keeps the pending-delete confirmation as
+ * its own local [remember]ed state, the same way a screen composable owns any
+ * UI-only state that its caller has no reason to know about.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryContent(
@@ -68,6 +78,12 @@ fun LibraryContent(
     onDelete: (String) -> Unit,
     onBack: () -> Unit = {},
 ) {
+    // The item a long-press is offering to delete, awaiting confirmation. This
+    // is a children's app and the card's only other gesture is a tap to open
+    // it, so a long-press must ask before it deletes the page, its photograph,
+    // and its unshared audio outright.
+    var pendingDelete by remember { mutableStateOf<LibraryItem?>(null) }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -97,16 +113,33 @@ fun LibraryContent(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 items(state.items, key = { it.id }) { item ->
-                    LibraryCard(item = item, onOpen = onOpen, onDelete = onDelete)
+                    LibraryCard(item = item, onOpen = onOpen, onRequestDelete = { pendingDelete = item })
                 }
             }
         }
     }
+
+    pendingDelete?.let { item ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("Delete this page?") },
+            text = { Text("This removes the page read on ${item.readAt}, its photo, and its audio.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    onDelete(item.id)
+                    pendingDelete = null
+                }) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("Cancel") }
+            },
+        )
+    }
 }
 
-/** One stored page: its thumbnail and the day it was read. Long-press deletes it. */
+/** One stored page: its thumbnail and the day it was read. Long-press offers to delete it. */
 @Composable
-private fun LibraryCard(item: LibraryItem, onOpen: (String) -> Unit, onDelete: (String) -> Unit) {
+private fun LibraryCard(item: LibraryItem, onOpen: (String) -> Unit, onRequestDelete: () -> Unit) {
     // Decoded off the composition thread, exactly as PanelCard decodes a panel
     // crop: a grid of full-size JPEGs decoded inline on the main thread would drop
     // frames while it scrolls.
@@ -121,7 +154,7 @@ private fun LibraryCard(item: LibraryItem, onOpen: (String) -> Unit, onDelete: (
             .fillMaxWidth()
             .combinedClickable(
                 onClick = { onOpen(item.id) },
-                onLongClick = { onDelete(item.id) },
+                onLongClick = onRequestDelete,
             )
             .semantics { contentDescription = "Read this page again" },
     ) {

@@ -14,10 +14,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 private class RecordingLibrary : StoredPageRepository {
-    val saved = mutableListOf<Pair<String, Int>>()
+    val saved = mutableListOf<Triple<String, Int, PageImage>>()
     override fun observeLibrary(): Flow<List<StoredPage>> = flowOf(emptyList())
     override suspend fun save(id: String, image: PageImage, units: List<PreparedUnit>) {
-        saved += id to units.size
+        saved += Triple(id, units.size, image)
     }
     override suspend fun open(id: String): StoredPage? = null
     override suspend fun delete(id: String) = Unit
@@ -35,9 +35,18 @@ private class FailingLibrary : StoredPageRepository {
 
 class ReadingPipelineSaveTest {
 
-    /** A page is stored once it is fully prepared, not when anyone looks at it. */
+    /**
+     * A page is stored once it is fully prepared, not when anyone looks at it.
+     *
+     * The id is asserted against sha256(image.bytes) computed HERE, from the
+     * same bytes [pageImage] hands the pipeline - not just its unit count - so
+     * this actually pins the two rulings the spec spent on that id: it is
+     * `sha256(image.bytes)`, and nothing else (see the comment on the id in
+     * [ReadingPipelineImpl.prepareAll]).
+     */
     @Test fun `a fully read page is saved`() = runTest {
         val library = RecordingLibrary()
+        val image = pageImage()
         val p = ReadingPipelineImpl(
             FakePageReader(Result.success((0..1).map { speechUnit(it) })),
             FakeVoiceRepository(),
@@ -46,11 +55,14 @@ class ReadingPipelineSaveTest {
             library,
         )
 
-        p.start(pageImage())
+        p.start(image)
         advanceUntilIdle()
 
         assertEquals(1, library.saved.size)
-        assertEquals(2, library.saved.single().second)
+        val (id, unitCount, savedImage) = library.saved.single()
+        assertEquals(sha256(image.bytes), id)
+        assertEquals(2, unitCount)
+        assertEquals(image, savedImage)
     }
 
     /**

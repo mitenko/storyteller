@@ -77,6 +77,21 @@ class LibraryViewModel @Inject constructor(
      * can hear.
      */
     fun open(id: String) {
+        // Called SYNCHRONOUSLY, before the launch below and therefore before
+        // repository.open() has a chance to suspend, for the same reason
+        // CaptureViewModel.onConfirm calls pipeline.start synchronously:
+        // LibraryScreen navigates to the reader the instant this function
+        // returns, without waiting for it. ReadingPipeline is
+        // @ActivityRetainedScoped and outlives the reader screen, so without
+        // this the newly created ReaderViewModel attaches to a StateFlow
+        // still holding Ready from whatever page was read before this one.
+        // In Auto mode that stale Ready gets queued as if it were the new
+        // page, and the new page's own units then arrive as Preparing - a
+        // state ReaderViewModel does not treat as a reset point - so they
+        // are silently diffed against the previous page's unit count and
+        // can be dropped entirely. Resetting here, before navigation can
+        // attach anything to the stale state, closes that window.
+        pipeline.reset()
         viewModelScope.launch {
             val page = repository.open(id) ?: return@launch
             val displayBytes = try {
