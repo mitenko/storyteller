@@ -12,6 +12,7 @@ import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.PipelineState
 import com.storyteller.domain.model.PlaybackState
 import com.storyteller.domain.model.PreparedUnit
+import com.storyteller.domain.model.WordTiming
 import com.storyteller.domain.model.ReadingMode
 import com.storyteller.domain.model.ThemeChoice
 import com.storyteller.domain.model.SpeechUnit
@@ -25,16 +26,21 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.yield
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -96,6 +102,13 @@ class ThrowsAfterFirstEmissionSettingsRepository : SettingsRepository {
 
 class FakePlayer : PagePlayer {
     override val state = MutableStateFlow<PlaybackState>(PlaybackState.Idle)
+
+    /** What the next positionMs() call reports, and how many calls have been made. */
+    var position = 0
+    var positionReads = 0
+    var duration = 0
+    override fun positionMs(): Int { positionReads++; return position }
+    override fun durationMs(): Int = duration
     val played = mutableListOf<Int>()
     val appended = mutableListOf<Int>()
     var stops = 0
@@ -186,6 +199,190 @@ class ReaderViewModelTest {
         pipeline.emit(PipelineState.Ready(prepared, image = null))
         advanceUntilIdle()
         return vm.uiState.value as ReaderUiState.Playing
+    }
+
+    // --- M4B: the position sampler ---
+
+    /**
+     * positionMs runs only while something collects it, so every test here must
+     * subscribe. That is the design, not a detail: a test that does not care never
+     * starts a delay loop, and an always-on loop stops the test scheduler ever
+     * reaching idle - which hangs every test that merely builds a ViewModel.
+     */
+    private fun TestScope.collecting(vm: ReaderViewModel): Job =
+        launch { vm.positionMs.collect { } }
+
+    @Test fun `position follows the player while a line is sounding`() = runTest(dispatcher) {
+        val player = FakePlayer()
+        val vm = readerViewModel(player)
+        val job = collecting(vm)
+        player.state.value = PlaybackState.Playing(0)
+        player.position = 450
+        advanceTimeBy(200)
+
+        assertEquals(450, vm.positionMs.value)
+        job.cancel()
+    }
+
+    /**
+     * A paused or finished page must stop sampling, or the accent creeps forward
+     * through silence and points at words nobody is saying.
+     */
+    @Test fun `position returns to zero when playback finishes`() = runTest(dispatcher) {
+        val player = FakePlayer()
+        val vm = readerViewModel(player)
+        val job = collecting(vm)
+        player.state.value = PlaybackState.Playing(0)
+        player.position = 800
+        advanceTimeBy(200)
+        assertEquals(800, vm.positionMs.value)
+
+        player.state.value = PlaybackState.Finished
+        advanceTimeBy(200)
+
+        assertEquals(0, vm.positionMs.value)
+        job.cancel()
+    }
+
+    /** Nothing sounding, nothing sampled: an idle page highlights no word at all. */
+    @Test fun `an idle page reports no position`() = runTest(dispatcher) {
+        val player = FakePlayer()
+        val vm = readerViewModel(player)
+        val job = collecting(vm)
+        player.position = 999
+        advanceTimeBy(300)
+
+        assertEquals(0, vm.positionMs.value)
+        job.cancel()
+    }
+
+    /**
+     * The guarantee that makes a poll loop safe near a @Singleton player: no
+     * collector, no polling. A reader nobody is looking at cannot leave a loop
+     * reading a player that outlives every screen.
+     */
+    @Test fun `nothing is sampled while nobody is watching`() = runTest(dispatcher) {
+        val player = FakePlayer()
+        readerViewModel(player)
+        player.state.value = PlaybackState.Playing(0)
+        advanceTimeBy(500)
+
+        assertEquals("an unobserved reader must not poll", 0, player.positionReads)
+    }
+
+    /** And it stops again when the last collector goes. */
+    @Test fun `sampling stops when the last collector leaves`() = runTest(dispatcher) {
+        val player = FakePlayer()
+        val vm = readerViewModel(player)
+        val job = collecting(vm)
+        player.state.value = PlaybackState.Playing(0)
+        advanceTimeBy(200)
+        assertTrue("should have been sampling", player.positionReads > 0)
+
+        job.cancel()
+        val readsAtCancel = player.positionReads
+        advanceTimeBy(600)
+
+        assertEquals(readsAtCancel, player.positionReads)
+    }
+
+    // --- M4C: which word is spoken ---
+
+    /**
+     * The whole point of M4: a position inside the clip becomes a word index the
+     * row can bold.
+     */
+    @Test fun `the spoken word follows the position through stored timings`() = runTest(dispatcher) {
+        val player = FakePlayer()
+        val vm = readerViewModel(player)
+        val unit = speechUnit(0, text = "one two three")
+        pipeline.emit(
+            PipelineState.Ready(
+                listOf(
+                    PreparedUnit(
+                        unit, "v", File("/tmp/0.mp3"),
+                        timings = listOf(WordTiming(0, 100), WordTiming(200, 300), WordTiming(400, 500)),
+                    ),
+                ),
+                image = null,
+            ),
+        )
+        advanceUntilIdle()
+        val job = launch { vm.spokenWord.collect { } }
+        player.state.value = PlaybackState.Playing(0)
+
+        player.position = 250
+        advanceTimeBy(200)
+        assertEquals(SpokenWord(lineIndex = 0, wordIndex = 1), vm.spokenWord.value)
+
+        player.position = 450
+        advanceTimeBy(200)
+        assertEquals(SpokenWord(lineIndex = 0, wordIndex = 2), vm.spokenWord.value)
+
+        player.state.value = PlaybackState.Finished
+        job.cancel()
+    }
+
+    /**
+     * A clip cached before timings existed. The estimate is rough - it knows
+     * nothing of pauses - but an approximate accent beats none, and beats
+     * re-buying audio already paid for.
+     */
+    @Test fun `a line with no stored timings is estimated from the clip duration`() = runTest(dispatcher) {
+        val player = FakePlayer()
+        player.duration = 1000
+        val vm = readerViewModel(player)
+        pipeline.emit(
+            PipelineState.Ready(
+                listOf(PreparedUnit(speechUnit(0, text = "aa bb"), "v", File("/tmp/0.mp3"))),
+                image = null,
+            ),
+        )
+        advanceUntilIdle()
+        val job = launch { vm.spokenWord.collect { } }
+        player.state.value = PlaybackState.Playing(0)
+
+        player.position = 900
+        advanceTimeBy(200)
+
+        assertEquals(SpokenWord(lineIndex = 0, wordIndex = 1), vm.spokenWord.value)
+        player.state.value = PlaybackState.Finished
+        job.cancel()
+    }
+
+    /**
+     * No timings and no duration is the honest "cannot place a word" case, and it
+     * must show no accent rather than guess one. Media3 reports an unset duration
+     * as TIME_UNSET, so this is reachable in practice.
+     */
+    @Test fun `no timings and no duration accents nothing`() = runTest(dispatcher) {
+        val player = FakePlayer()
+        player.duration = 0
+        val vm = readerViewModel(player)
+        pipeline.emit(
+            PipelineState.Ready(
+                listOf(PreparedUnit(speechUnit(0, text = "aa bb"), "v", File("/tmp/0.mp3"))),
+                image = null,
+            ),
+        )
+        advanceUntilIdle()
+        val job = launch { vm.spokenWord.collect { } }
+        player.state.value = PlaybackState.Playing(0)
+        player.position = 500
+        advanceTimeBy(200)
+
+        assertNull(vm.spokenWord.value)
+        player.state.value = PlaybackState.Finished
+        job.cancel()
+    }
+
+    @Test fun `nothing is spoken while the page is idle`() = runTest(dispatcher) {
+        val vm = readerViewModel(FakePlayer())
+        val job = launch { vm.spokenWord.collect { } }
+        advanceTimeBy(300)
+
+        assertNull(vm.spokenWord.value)
+        job.cancel()
     }
 
     @Test fun `maps pipeline states to reader states`() = runTest(dispatcher) {

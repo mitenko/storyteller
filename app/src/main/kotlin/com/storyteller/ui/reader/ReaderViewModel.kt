@@ -13,7 +13,18 @@ import com.storyteller.domain.model.SpeechUnit
 import com.storyteller.domain.repository.PagePlayer
 import com.storyteller.domain.repository.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.stateIn
+import com.storyteller.domain.model.WordTiming
+import com.storyteller.domain.model.estimateWordTimings
+import com.storyteller.domain.model.wordIndexAt
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
@@ -70,6 +81,63 @@ class ReaderViewModel @Inject constructor(
 
     /** Which unit is on screen. Bounded at both ends in [playingState] and [onLineTapped]; reset alongside [queued]. */
     private var current = 0
+
+    /**
+     * Milliseconds elapsed within the sounding line, sampled while it plays.
+     *
+     * Cold, and shared only WHILE SOMETHING IS COLLECTING. Nothing displaying a
+     * word means nothing polling a player, so an idle page costs nothing - and a
+     * test that never reads this never starts a loop at all. That second part is
+     * not a nicety: an always-on delay loop means the test scheduler never reaches
+     * idle, so advanceUntilIdle never returns and every test that merely builds a
+     * ViewModel hangs. Relying on each test to stop playback first would leave the
+     * same trap armed for whoever writes the next one.
+     *
+     * Deliberately NOT a field on [ReaderUiState.Playing]: at this cadence that
+     * would rebuild the whole reader state - the object every panel card is
+     * compared against - seventeen times a second, when a position belongs to one
+     * line.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val positionMs: StateFlow<Int> = player.state
+        .flatMapLatest { state ->
+            if (state is PlaybackState.Playing) {
+                flow {
+                    while (true) {
+                        emit(player.positionMs())
+                        delay(SAMPLE_INTERVAL_MS)
+                    }
+                }
+            } else {
+                // Paused or finished: back to zero, or the accent creeps through
+                // silence pointing at words nobody is saying.
+                flowOf(0)
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), 0)
+
+    /**
+     * The word being spoken right now, or null when none is.
+     *
+     * Derived here rather than in the screen so the rule is testable without a
+     * Compose harness, and so the screen never has to decide what to do about a
+     * line with no timings.
+     *
+     * Falls back to estimating from the clip's duration when the line has no
+     * stored alignment - every clip cached before timings existed. The estimate is
+     * wrong on any line with a pause in it, which comics are full of, but an
+     * approximate accent beats none and beats re-buying the audio.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val spokenWord: StateFlow<SpokenWord?> = positionMs
+        .map { position ->
+            val state = _uiState.value as? ReaderUiState.Playing ?: return@map null
+            val index = state.playingIndex ?: return@map null
+            val line = state.lines.getOrNull(index) ?: return@map null
+            val timings = line.timings.ifEmpty { estimateWordTimings(line.text, player.durationMs()) }
+            timings.wordIndexAt(position)?.let { SpokenWord(lineIndex = index, wordIndex = it) }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), null)
 
     init {
         viewModelScope.launch {
@@ -257,6 +325,7 @@ class ReaderViewModel @Inject constructor(
                     // report every bubble ready regardless of synthesis progress,
                     // which lost Auto's only progress indication (F7).
                     audioReady = u.index in readyIndices,
+                    timings = ready.firstOrNull { it.unit.index == u.index }?.timings.orEmpty(),
                 )
             }.groupByPanel(),
             current = current,
@@ -352,3 +421,19 @@ private fun FailureReason.message(): String = when (this) {
     FailureReason.Unknown ->
         "Something went wrong reading this page. Try again."
 }
+
+/**
+ * How often the player is asked where it is.
+ *
+ * 60ms is under four frames, so a word lands within a few frames of being spoken,
+ * at seventeen reads a second rather than sixty. Wrong in the cheap direction is a
+ * visibly lagging accent; wrong in the expensive direction is a poll loop
+ * competing with playback on the main thread.
+ *
+ * A file constant, not a class property: a property read inside another property's
+ * initialiser would still be zero, and positionMs is built at construction time.
+ */
+private const val SAMPLE_INTERVAL_MS = 60L
+
+/** Which word of which line is sounding. */
+data class SpokenWord(val lineIndex: Int, val wordIndex: Int)

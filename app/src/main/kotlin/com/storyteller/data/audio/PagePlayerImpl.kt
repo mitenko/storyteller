@@ -119,6 +119,17 @@ class PagePlayerImpl(context: Context) : PagePlayer {
         }
     }
 
+    /**
+     * Read on the player's own looper, which is where every caller already is: the
+     * only sampler is ReaderViewModel's, running on viewModelScope's Main
+     * dispatcher. Media3 throws if touched from another thread, so a future caller
+     * off the main thread has to bring its own hop rather than discover this here.
+     */
+    override fun positionMs(): Int = player.currentPosition.coerceAtLeast(0L).toInt()
+
+    /** TIME_UNSET (and anything negative) reads as 0: unknown, so do not estimate. */
+    override fun durationMs(): Int = player.duration.takeIf { it > 0L }?.toInt() ?: 0
+
     override fun stop() {
         player.stop()
         player.clearMediaItems()
