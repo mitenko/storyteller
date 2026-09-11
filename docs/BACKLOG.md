@@ -22,6 +22,8 @@ them. Nothing here is scheduled.
 | 11 | Multiple profiles | M | 2 | Two children, two libraries |
 | 12 | Device-TTS fallback | M | — | Works offline / when ElevenLabs is down |
 | 13 | WiFi pre-check | S | — | No surprise mobile-data spend |
+| **15** | **Say non-words as sounds (M10A)** | S | — | "MM?" hums instead of spelling "em-em" |
+| **16** | **Real sound effects for POW/BOOM (M10B)** | M | — | A crash sounds like a crash, and costs no synthesis |
 | **14** | **Bold the word as it is read** | M | — | A pre-reader can follow the words, not just hear them |
 
 Recommended order is at the bottom, with reasoning.
@@ -587,3 +589,65 @@ experiment and should not block books unless re-photograph recognition proves
 essential.
 
 **M9 last, and possibly never.** Nothing above depends on any of it.
+
+## M10 — Lines that are not ordinary speech
+
+Comics are full of text that is not a sentence, and the reader currently sends all
+of it to a text-to-speech engine that assumes it is one. Two separate problems,
+both heard on a device on 2026-09-11.
+
+### M10A — Say non-words as sounds, not as letters
+
+`MM?` on page `1789149384715` is read "em-em", because a short all-caps token looks
+like an initialism. The same trap catches `HMM`, `UGH`, `OOF`, `SHH`, `ERGH` - all
+of which appear on pages already measured.
+
+The likely cause is the lettering itself: comics are set in CAPITALS, and TTS
+treats short capitalised tokens as initialisms. So the cheapest experiment is not a
+dictionary but a case change - send `Mm?` and keep `MM?` on screen.
+
+| id | task | size |
+|---|---|---|
+| M10A.1 | Probe the API: does `Mm?` hum where `MM?` spells? | XS |
+| M10A.2 | Normalise case for SYNTHESIS only, never for display | S |
+| M10A.3 | Key the audio cache on the spoken text, not the shown text | XS |
+| M10A.4 | Bump `PARSE_VERSION`, since every cached clip was made from the old text | XS |
+| M10A.5 | Test: display text is unchanged while spoken text is normalised | S |
+| M10A.6 | Re-measure a page of interjections and listen | S |
+
+**The cache is the trap here.** Audio is keyed on `sha256(voiceId|text)`. Change
+the text sent without changing the key and every existing clip is served against
+the wrong key; change the key without thinking and every clip ever bought is
+orphaned in one go. M10A.3 exists to be decided deliberately rather than
+discovered.
+
+**Not established:** whether case alone fixes it. If `Mm?` still spells, the next
+option is a small substitution table for the dozen interjections comics actually
+use, which is more code and more likely to be wrong on a word nobody anticipated.
+
+### M10B — Play a real sound for POW and BOOM
+
+A sound effect read aloud in a character voice is not a sound effect. `POW`,
+`BOOM`, `CRASH`, `PAF`, `FOOMP` want a noise, not a narrator.
+
+| id | task | size |
+|---|---|---|
+| M10B.1 | Decide the line: which words get a sound, and who says the rest | XS |
+| M10B.2 | Source or synthesise a small bundled set of effects | S |
+| M10B.3 | Match a unit's text to an effect, case and punctuation insensitive | S |
+| M10B.4 | Play the effect in place of synthesis, reusing the same playlist | S |
+| M10B.5 | Fall back to reading the word when no effect matches | S |
+| M10B.6 | Test: a matched unit costs no ElevenLabs call | S |
+
+**It saves money as well as sounding better.** Sound-effect units are pure cost
+today - one synthesis each, at ElevenLabs rates, to say "FOOMP" badly. The rabbit
+page alone carries four.
+
+**M10B.1 is a product decision, not a technical one.** A bundled "POW" is one
+fixed noise for every book and every art style, where the narrator at least varies
+with the page. Worth hearing both before committing - and worth asking whether a
+child prefers the word read dramatically to a canned crash.
+
+**Both depend on M4's word timings only loosely:** a substituted effect has no word
+alignment, so the accent simply does not apply to it, which the existing null path
+already handles.

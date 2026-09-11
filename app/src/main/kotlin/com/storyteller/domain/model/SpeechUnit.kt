@@ -110,28 +110,69 @@ const val NARRATOR = "Narrator"
  * Indices come from position AFTER dropping, so they stay contiguous and can be
  * used directly as playlist positions.
  */
+/**
+ * Same balloon, twice?
+ *
+ * Same words in the same BOX. Nothing weaker: a comic repeats sound effects
+ * constantly - one measured page carries "PAF!" twice and "FOOMP!" twice - and
+ * those are different balloons in different places. Matching on text alone would
+ * delete a line a child is meant to hear.
+ *
+ * A null box is no evidence either way, so it never matches.
+ */
+private fun ParsedUnit.isSameBalloonAs(other: ParsedUnit): Boolean =
+    bounds != null && bounds == other.bounds &&
+        text.trim().equals(other.text.trim(), ignoreCase = true)
+
+/**
+ * Assigns reading-order indices from list position, drops units with no
+ * speakable text, collapses a balloon returned twice, and normalizes a missing
+ * speaker to [NARRATOR].
+ *
+ * Indices come from position AFTER dropping, so they stay contiguous and can be
+ * used directly as playlist positions.
+ *
+ * The de-duplication is not theoretical. On a device on 2026-09-11 the model
+ * returned "WATCH YOUR STEP." twice from one balloon - once as Narrator and once
+ * attributed to the old man who says it - with byte-identical bounds and panel,
+ * and the child heard it read out twice. Where both copies exist the ATTRIBUTED
+ * one wins: a named character can be given a voice, and a line wrongly left with
+ * the narrator cannot be repaired later, because the voice map will already have
+ * been keyed on it.
+ */
 fun List<ParsedUnit>.toSpeechUnits(characters: List<PageCharacter> = emptyList()): List<SpeechUnit> {
     val byId = characters.associateBy { it.id }
-    return filter { it.text.isNotBlank() }
-        .mapIndexed { i, p ->
-            val speaker = p.speaker.trim().ifBlank { NARRATOR }
-            // Reject-don't-invent, applied to identity: an id the roster does not
-            // contain is a model error, and keeping it would let the voice lookup
-            // miss without anyone noticing.
-            val character = p.characterId?.takeIf { it.isNotBlank() }?.let { byId[it] }
-            SpeechUnit(
-                index = i,
-                speaker = speaker,
-                text = p.text.trim(),
-                bounds = p.bounds,
-                panel = p.panel,
-                characterId = character?.id,
-                // The page's own NAME when it has one, the label otherwise. Never
-                // the description - see characterKey for the measurement that
-                // settled this.
-                voiceKey = characterKey(name = character?.name.orEmpty(), label = speaker),
-            )
+
+    val unique = mutableListOf<ParsedUnit>()
+    for (parsed in filter { it.text.isNotBlank() }) {
+        val existing = unique.indexOfFirst { it.isSameBalloonAs(parsed) }
+        when {
+            existing < 0 -> unique += parsed
+            // Keep the position of the first copy - it is the reading order the
+            // model chose - but take the better attribution of the two.
+            unique[existing].characterId == null && parsed.characterId != null ->
+                unique[existing] = parsed
         }
+    }
+
+    return unique.mapIndexed { i, p ->
+        val speaker = p.speaker.trim().ifBlank { NARRATOR }
+        // Reject-don't-invent, applied to identity: an id the roster does not
+        // contain is a model error, and keeping it would let the voice lookup
+        // miss without anyone noticing.
+        val character = p.characterId?.takeIf { it.isNotBlank() }?.let { byId[it] }
+        SpeechUnit(
+            index = i,
+            speaker = speaker,
+            text = p.text.trim(),
+            bounds = p.bounds,
+            panel = p.panel,
+            characterId = character?.id,
+            // The page's own NAME when it has one, the label otherwise. Never the
+            // description - see characterKey for the measurement that settled this.
+            voiceKey = characterKey(name = character?.name.orEmpty(), label = speaker),
+        )
+    }
 }
 
 /**
