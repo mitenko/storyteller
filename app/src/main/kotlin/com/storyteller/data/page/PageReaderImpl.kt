@@ -5,7 +5,7 @@ import com.storyteller.data.diagnostics.DiagnosticWriter
 import com.storyteller.data.local.PARSE_VERSION
 import com.storyteller.data.local.ParsedPageDao
 import com.storyteller.data.local.ParsedPageEntity
-import com.storyteller.data.sha256
+import com.storyteller.domain.sha256
 import com.storyteller.domain.model.BoundingBox
 import com.storyteller.domain.model.PageCharacter
 import com.storyteller.domain.model.PageImage

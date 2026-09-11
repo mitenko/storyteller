@@ -52,4 +52,15 @@ class GraphTest {
             .toList()
         assertTrue("domain imports Android in: $offenders", offenders.isEmpty())
     }
+
+    @Test fun `domain never imports data`() {
+        val domainDir = File(srcMain, "domain")
+        val offenders = domainDir.walkTopDown()
+            .filter { it.isFile && it.extension == "kt" }
+            .filter { f -> f.readLines().any { it.startsWith("import com.storyteller.data") } }
+            .map { it.name }
+            .toList()
+
+        assertTrue("domain imports data in: $offenders", offenders.isEmpty())
+    }
 }

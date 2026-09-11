@@ -7,7 +7,7 @@ import com.storyteller.data.local.PARSE_VERSION
 import com.storyteller.data.local.ParsedPageEntity
 import com.storyteller.data.local.StorytellerDatabase
 import com.storyteller.data.diagnostics.DiagnosticWriter
-import com.storyteller.data.sha256
+import com.storyteller.domain.sha256
 import com.storyteller.domain.model.PAGE_VISION_MODEL
 import com.storyteller.domain.model.ParsedPage
 import com.storyteller.domain.model.PageImage

@@ -9,6 +9,7 @@ import com.storyteller.domain.model.PreparedUnit
 import com.storyteller.domain.model.SpeechUnit
 import com.storyteller.domain.repository.AudioRepository
 import com.storyteller.domain.repository.PageReader
+import com.storyteller.domain.repository.StoredPageRepository
 import com.storyteller.domain.repository.VoiceRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -31,6 +32,11 @@ class ReadingPipelineImpl(
     private val voices: VoiceRepository,
     private val audio: AudioRepository,
     private val scope: CoroutineScope,
+    /**
+     * Null in tests that do not care about the library. A pipeline with no library
+     * reads pages perfectly well and simply forgets them.
+     */
+    private val library: StoredPageRepository? = null,
 ) : ReadingPipeline {
 
     private val _state = MutableStateFlow<PipelineState>(PipelineState.Idle)
@@ -61,9 +67,17 @@ class ReadingPipelineImpl(
      */
     private var epoch = 0L
 
+    /**
+     * Whether the page in flight came from the library. A stored page must not be
+     * saved again: it would take a new timestamp and jump to the front of a library
+     * that is ordered by when a page was READ, not by when it was last opened.
+     */
+    private var fromLibrary = false
+
     override fun start(image: PageImage) {
         synchronized(lock) {
             lastImage = image
+            fromLibrary = false
             job?.cancel()
             val myEpoch = ++epoch
             job = scope.launch { guarded(myEpoch) { run(image, myEpoch) } }
@@ -92,6 +106,7 @@ class ReadingPipelineImpl(
     override fun openStored(units: List<SpeechUnit>, image: PageImage) {
         synchronized(lock) {
             lastImage = image
+            fromLibrary = true
             parsed = units
             job?.cancel()
             val myEpoch = ++epoch
@@ -188,7 +203,14 @@ class ReadingPipelineImpl(
             ready += prepared
             setState(myEpoch, PipelineState.Preparing(units, ready.toList(), image))
         }
-        setState(myEpoch, PipelineState.Ready(ready.toList(), image))
+        val finished = ready.toList()
+        if (!fromLibrary) {
+            // The id is the hash of the uploaded bytes, which is what parsed_page
+            // keys on too, so a stored page and its cached parse agree by
+            // construction.
+            library?.save(sha256(image.bytes), image, finished)
+        }
+        setState(myEpoch, PipelineState.Ready(finished, image))
     }
 
     /**

@@ -1,4 +1,4 @@
-package com.storyteller.data
+package com.storyteller.domain
 
 import java.security.MessageDigest
 
