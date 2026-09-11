@@ -8,6 +8,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
@@ -34,6 +35,7 @@ private const val TAG = "CaptureScreen"
 fun CaptureScreen(
     onNavigateToReader: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenLibrary: () -> Unit,
     viewModel: CaptureViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -96,11 +98,13 @@ fun CaptureScreen(
             }
         }
 
-        IconButton(
-            onClick = onOpenSettings,
-            modifier = Modifier.align(Alignment.TopEnd).padding(16.dp),
-        ) {
-            Icon(painter = painterResource(R.drawable.ic_settings), contentDescription = "Settings")
+        Row(modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)) {
+            IconButton(onClick = onOpenLibrary) {
+                Icon(painter = painterResource(R.drawable.ic_library), contentDescription = "Pages you have read")
+            }
+            IconButton(onClick = onOpenSettings) {
+                Icon(painter = painterResource(R.drawable.ic_settings), contentDescription = "Settings")
+            }
         }
     }
 }
