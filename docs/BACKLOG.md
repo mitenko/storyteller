@@ -4,6 +4,22 @@ For prioritising. Sizes are estimates, not measurements. Items 1 and 2 are the
 ones asked for; the rest are what the code and the measurements say sits around
 them. Nothing here is scheduled.
 
+## Where this stands
+
+| milestone | state |
+|---|---|
+| M0 decisions | D1, D2, D3, D5 **still open**; D4 answered (alignment + estimator) |
+| M1 speaker accuracy | **done**, PR #5, measured 69% → 91% |
+| M2 character roster | **done**, PR #6 |
+| M4A/B/C bold-as-read | **done**, seen working on a device 2026-09-11 |
+| M10A non-words | **done bar hearing it** |
+| G the walkthrough | **still unrun** |
+| everything else | not started |
+
+Two bugs were found by using the app that no test had caught: the reader ringed the
+wrong line, and one balloon could be read twice. Both are fixed. That remains the
+best argument for running G.
+
 ## The list at a glance
 
 | # | Feature | Size | Blocked by | What it buys |
@@ -22,7 +38,7 @@ them. Nothing here is scheduled.
 | 11 | Multiple profiles | M | 2 | Two children, two libraries |
 | 12 | Device-TTS fallback | M | — | Works offline / when ElevenLabs is down |
 | 13 | WiFi pre-check | S | — | No surprise mobile-data spend |
-| **15** | **Say non-words as sounds (M10A)** | S | — | "MM?" hums instead of spelling "em-em" |
+| **15** | **Say non-words as sounds (M10A)** | S | — | **done, unheard** — "MM?" hums instead of spelling "em-em" |
 | **16** | **Real sound effects for POW/BOOM (M10B)** | M | — | A crash sounds like a crash, and costs no synthesis |
 | **14** | **Bold the word as it is read** | M | — | A pre-reader can follow the words, not just hear them |
 
@@ -353,7 +369,12 @@ five separate stalls later.
 Suggested for a personal build: **per page**, **manual**, **refuse**, **alignment
 with the estimator as fallback**, **page's shortest line**.
 
-## M1 — Speaker accuracy (the measured win, ships alone)
+## M1 — Speaker accuracy — **done 2026-09-10, PR #5**
+
+Measured 69% to **91%**, generic placeholders 8 to 0, no dropped sound effects,
+vocative errors 2/15 to 1/15. Better than the 81% the spike predicted. `MAX_TOKENS`
+needed no change: the shipped wording spends zero thinking tokens where the spike's
+draft spent 3,600-7,230.
 
 | id | task | size |
 |---|---|---|
@@ -370,7 +391,12 @@ with the estimator as fallback**, **page's shortest line**.
 **Done when** the measurement reproduces 80% or better with no dropped sound
 effects.
 
-## M2 — Character roster (the hinge; unblocks M3, and #8 and #11 later)
+## M2 — Character roster — **done 2026-09-10, PR #6**
+
+Zero dangling ids, zero duplicate ids, zero dropped lines over nine reads. Wrong
+attributions fell 4 to 1 and the last vocative error went with them. The limit is a
+passing test: a character named on one page and only described on another is still
+two, and 23 of 28 characters came back unnamed.
 
 The ID must be stable beyond one model response. A generated `character_1` is
 only response-local unless it is persisted with the page or reconciled against
@@ -419,7 +445,7 @@ wait until stored-page ownership exists so changed audio has a durable home.
 
 **Done when** a disliked voice can be changed and stays changed.
 
-## M4A — Word timing data (part of bold-as-read)
+## M4A — Word timing data — **done 2026-09-11**
 
 Timing persistence is independent of playback sampling. Finish this slice before
 changing the player so cached audio has a defined timing contract.
@@ -432,7 +458,11 @@ changing the player so cached audio has a defined timing contract.
 | M4A.4 | Degrade cleanly when cached audio has no timings | S |
 | M4A.5 | Test timing serialization and estimator fallback | S |
 
-## M4B — Playback position (part of bold-as-read)
+## M4B — Playback position — **done 2026-09-11**
+
+The sampler is a cold flow shared `WhileSubscribed`: no collector, no loop. Two
+earlier shapes hung the whole test suite, the first badly enough to be killed for
+memory — an always-on delay loop means the test scheduler never reaches idle.
 
 | id | task | size |
 |---|---|---|
@@ -442,7 +472,7 @@ changing the player so cached audio has a defined timing contract.
 | M4B.4 | Map position through `ReaderViewModel.playlistUnits`, not playlist index | S |
 | M4B.5 | Test sampler lifecycle and unit mapping | S |
 
-## M4C — Word highlight UI (part of bold-as-read)
+## M4C — Word highlight UI — **done 2026-09-11, seen on a device**
 
 | id | task | size |
 |---|---|---|
@@ -596,34 +626,50 @@ Comics are full of text that is not a sentence, and the reader currently sends a
 of it to a text-to-speech engine that assumes it is one. Two separate problems,
 both heard on a device on 2026-09-11.
 
-### M10A — Say non-words as sounds, not as letters
+### M10A — Say non-words as sounds, not as letters — **mostly done 2026-09-11**
 
-`MM?` on page `1789149384715` is read "em-em", because a short all-caps token looks
-like an initialism. The same trap catches `HMM`, `UGH`, `OOF`, `SHH`, `ERGH` - all
-of which appear on pages already measured.
+`MM?` on page `1789149384715` was read "em-em" on a device, because a short
+all-caps token looks like an initialism and comics are lettered in capitals.
 
-The likely cause is the lettering itself: comics are set in CAPITALS, and TTS
-treats short capitalised tokens as initialisms. So the cheapest experiment is not a
-dictionary but a case change - send `Mm?` and keep `MM?` on screen.
+**The probe settled the shape of this, and narrowed it.** Each word synthesised
+both ways, one sample each:
 
-| id | task | size |
-|---|---|---|
-| M10A.1 | Probe the API: does `Mm?` hum where `MM?` spells? | XS |
-| M10A.2 | Normalise case for SYNTHESIS only, never for display | S |
-| M10A.3 | Key the audio cache on the spoken text, not the shown text | XS |
-| M10A.4 | Bump `PARSE_VERSION`, since every cached clip was made from the old text | XS |
-| M10A.5 | Test: display text is unchanged while spoken text is normalised | S |
-| M10A.6 | Re-measure a page of interjections and listen | S |
+| word | CAPS | sentence | ratio |
+|---|---|---|---|
+| **MM?** | 0.604s | **0.418s** | **x1.44** |
+| HMM. | 0.557s | 0.511s | x1.09 |
+| UGH! | 0.464s | 0.511s | x0.91 |
+| SHH. | 0.464s | 0.604s | x0.77 |
 
-**The cache is the trap here.** Audio is keyed on `sha256(voiceId|text)`. Change
-the text sent without changing the key and every existing clip is served against
-the wrong key; change the key without thinking and every clip ever bought is
-orphaned in one go. M10A.3 exists to be decided deliberately rather than
-discovered.
+Only `MM` moves. `SHH` and `UGH` got **longer** in sentence case, so the blanket
+lower-casing this milestone originally assumed would have fixed one word and
+quietly damaged others — and would have rewritten every line of ordinary dialogue
+too, since those are capitals as well.
 
-**Not established:** whether case alone fixes it. If `Mm?` still spells, the next
-option is a small substitution table for the dozen interjections comics actually
-use, which is more code and more likely to be wrong on a word nobody anticipated.
+| id | task | size | status |
+|---|---|---|---|
+| M10A.1 | Probe: does `Mm?` hum where `MM?` spells? | XS | **done** — x1.44, table above |
+| M10A.2 | `spokenForm`, for SYNTHESIS only, never for display | S | **done** — runs of 2+ Ms only |
+| M10A.3 | Decide the cache key | XS | **done** — keyed on the spoken text |
+| M10A.4 | Bump `PARSE_VERSION` | XS | **not needed** — see below |
+| M10A.5 | Test: display unchanged, spoken text normalised | S | **done** — 10 cases |
+| M10A.6 | Hear it on a device and confirm | S | **open** — the only real proof |
+
+**The cache resolved more cheaply than feared.** Keying on the spoken text means
+lines whose spoken form equals their shown form — every line without an `MM` —
+keep the clips already bought. Only the handful that change get new keys. And the
+parse itself is untouched, so no `PARSE_VERSION` bump: M10A.4 is closed unbuilt.
+
+**Still not established, and it is the whole claim:** nobody has heard this.
+A 44% duration gap is strong evidence for spelled-versus-hummed and is not proof.
+If `Mm?` does not actually hum, the fallback is a small substitution table, which
+is more code and likelier to be wrong on a word nobody anticipated. Clips to judge
+by are in the session scratchpad under `m10a/`.
+
+**The rule is deliberately extensible and deliberately small.** Adding a word means
+adding a measurement beside it. `OK` is kept in the tests as the cautionary case:
+lower-casing it is exactly the plausible-looking change that makes a common word
+worse.
 
 ### M10B — Play a real sound for POW and BOOM
 
