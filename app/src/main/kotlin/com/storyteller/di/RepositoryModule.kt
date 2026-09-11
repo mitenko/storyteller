@@ -29,6 +29,8 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.json.Json
 import java.io.File
 import javax.inject.Named
@@ -81,6 +83,10 @@ object RepositoryModule {
     /** Under filesDir for the same reason audio is: the OS may purge cacheDir. */
     @Provides @Singleton @Named("pagesDir")
     fun pagesDir(@ApplicationContext ctx: Context): File = File(ctx.filesDir, "pages")
+
+    /** For reading a stored page's photograph off the main thread; see LibraryViewModel. */
+    @Provides @Singleton @Named("ioDispatcher")
+    fun ioDispatcher(): CoroutineDispatcher = Dispatchers.IO
 
     @Provides @Singleton
     fun storedPageRepository(
