@@ -9,8 +9,10 @@ import com.storyteller.data.diagnostics.DiagnosticWriterImpl
 import com.storyteller.data.local.CachedAudioDao
 import com.storyteller.data.local.ParsedPageDao
 import com.storyteller.data.local.SettingsDao
+import com.storyteller.data.local.StoredPageDao
 import com.storyteller.data.local.VoiceDao
 import com.storyteller.data.local.VoiceListDao
+import com.storyteller.data.library.StoredPageRepositoryImpl
 import com.storyteller.data.page.ClaudeApi
 import com.storyteller.data.page.PageReaderImpl
 import com.storyteller.data.settings.SettingsRepositoryImpl
@@ -20,6 +22,7 @@ import com.storyteller.domain.repository.AudioRepository
 import com.storyteller.domain.repository.PagePlayer
 import com.storyteller.domain.repository.PageReader
 import com.storyteller.domain.repository.SettingsRepository
+import com.storyteller.domain.repository.StoredPageRepository
 import com.storyteller.domain.repository.VoiceRepository
 import dagger.Module
 import dagger.Provides
@@ -74,4 +77,15 @@ object RepositoryModule {
 
     @Provides @Singleton
     fun settingsRepository(dao: SettingsDao): SettingsRepository = SettingsRepositoryImpl(dao)
+
+    /** Under filesDir for the same reason audio is: the OS may purge cacheDir. */
+    @Provides @Singleton @Named("pagesDir")
+    fun pagesDir(@ApplicationContext ctx: Context): File = File(ctx.filesDir, "pages")
+
+    @Provides @Singleton
+    fun storedPageRepository(
+        dao: StoredPageDao,
+        @Named("pagesDir") pagesDir: File,
+        @Named("audioDir") audioDir: File,
+    ): StoredPageRepository = StoredPageRepositoryImpl(dao, pagesDir, audioDir)
 }
