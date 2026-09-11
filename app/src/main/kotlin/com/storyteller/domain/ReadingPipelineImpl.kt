@@ -89,6 +89,21 @@ class ReadingPipelineImpl(
         }
     }
 
+    override fun openStored(units: List<SpeechUnit>, image: PageImage) {
+        synchronized(lock) {
+            lastImage = image
+            parsed = units
+            job?.cancel()
+            val myEpoch = ++epoch
+            job = scope.launch {
+                guarded(myEpoch) {
+                    setState(myEpoch, PipelineState.Preparing(units, emptyList(), image))
+                    prepareAll(units, myEpoch, image)
+                }
+            }
+        }
+    }
+
     override fun reset() {
         synchronized(lock) {
             job?.cancel()
