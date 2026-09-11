@@ -1,6 +1,7 @@
 package com.storyteller.domain
 
 import com.storyteller.domain.model.PageImage
+import com.storyteller.domain.model.PipelineState
 import com.storyteller.domain.model.PreparedUnit
 import com.storyteller.domain.model.StoredPage
 import com.storyteller.domain.repository.StoredPageRepository
@@ -9,6 +10,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 private class RecordingLibrary : StoredPageRepository {
@@ -16,6 +18,16 @@ private class RecordingLibrary : StoredPageRepository {
     override fun observeLibrary(): Flow<List<StoredPage>> = flowOf(emptyList())
     override suspend fun save(id: String, image: PageImage, units: List<PreparedUnit>) {
         saved += id to units.size
+    }
+    override suspend fun open(id: String): StoredPage? = null
+    override suspend fun delete(id: String) = Unit
+}
+
+/** A library whose save() fails the way real I/O can: a full disk, a corrupt database. */
+private class FailingLibrary : StoredPageRepository {
+    override fun observeLibrary(): Flow<List<StoredPage>> = flowOf(emptyList())
+    override suspend fun save(id: String, image: PageImage, units: List<PreparedUnit>) {
+        throw java.io.IOException("disk full")
     }
     override suspend fun open(id: String): StoredPage? = null
     override suspend fun delete(id: String) = Unit
@@ -76,5 +88,25 @@ class ReadingPipelineSaveTest {
         advanceUntilIdle()
 
         assertEquals(0, library.saved.size)
+    }
+
+    /**
+     * The story worked; only the bookkeeping did not. A save that throws — a full
+     * disk, a corrupt database — must never turn a successful read into a
+     * reported failure.
+     */
+    @Test fun `a save failure does not fail the read`() = runTest {
+        val p = ReadingPipelineImpl(
+            FakePageReader(Result.success((0..1).map { speechUnit(it) })),
+            FakeVoiceRepository(),
+            FakeAudioRepository(),
+            this,
+            FailingLibrary(),
+        )
+
+        p.start(pageImage())
+        advanceUntilIdle()
+
+        assertTrue("expected Ready, got ${p.state.value}", p.state.value is PipelineState.Ready)
     }
 }

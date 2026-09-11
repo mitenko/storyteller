@@ -205,10 +205,35 @@ class ReadingPipelineImpl(
         }
         val finished = ready.toList()
         if (!fromLibrary) {
-            // The id is the hash of the uploaded bytes, which is what parsed_page
-            // keys on too, so a stored page and its cached parse agree by
-            // construction.
-            library?.save(sha256(image.bytes), image, finished)
+            // The id is plain sha256(image.bytes), deliberately NOT what
+            // PageReaderImpl's parse cache keys on (sha256(bytes + modelId)). The
+            // model id belongs in the parse-cache key, because switching vision
+            // models must invalidate a cached parse; it must be absent here,
+            // because switching models must not orphan a page already in a
+            // child's library — the transcript is what was read aloud, not the
+            // model that produced it. Same reasoning the spec already applies to
+            // parseVersion. The id only has to be stable and unique per page
+            // image.
+            //
+            // Saving is best-effort and wrapped so it can never turn a
+            // successful read into a reported failure: library.save() does real
+            // I/O (writing the photo, a Room upsert) and can throw on a full
+            // disk or a corrupt database. Without this catch, that throw would
+            // escape into guarded()'s Throwable handler and overwrite the Ready
+            // state below with Failed — the child would hear the whole page read
+            // perfectly and then be shown a failure. A page that was read but
+            // not remembered is a far better outcome than a page that was read
+            // and then reported broken. Cancellation is still rethrown, matching
+            // every other guard in this class; there is no domain-safe logger to
+            // report the swallowed failure to, since domain must not import
+            // android.util.Log.
+            try {
+                library?.save(sha256(image.bytes), image, finished)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                // Swallowed deliberately — see comment above.
+            }
         }
         setState(myEpoch, PipelineState.Ready(finished, image))
     }
