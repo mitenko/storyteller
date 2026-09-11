@@ -188,7 +188,10 @@ class ReadingPipelineImpl(
         val voiceId = voices.voiceFor(unit.voiceKey ?: NARRATOR)
             .getOrElse { return Result.failure(it) }
         val file = audio.audioFor(unit.text, voiceId).getOrElse { return Result.failure(it) }
-        Result.success(PreparedUnit(unit, voiceId, file))
+        // Timings are a nicety: a line reads perfectly well without them, so a
+        // missing or unreadable sidecar must never fail the unit that owns it.
+        val timings = audio.timingsFor(unit.text, voiceId).orEmpty()
+        Result.success(PreparedUnit(unit, voiceId, file, timings))
     } catch (e: CancellationException) {
         // See `guarded`: still-active means a spurious cancellation from the
         // repository, which has to become a reportable failure.

@@ -89,7 +89,17 @@ data class SpeechUnit(
     val voiceKey: String? = null,
 )
 
-data class PreparedUnit(val unit: SpeechUnit, val voiceId: String, val audio: File)
+/**
+ * [timings] is empty when the clip has none - anything synthesised before word
+ * timings existed. Empty is the ordinary case, not a fault; the reader estimates
+ * from the clip's duration rather than re-buying audio already paid for.
+ */
+data class PreparedUnit(
+    val unit: SpeechUnit,
+    val voiceId: String,
+    val audio: File,
+    val timings: List<WordTiming> = emptyList(),
+)
 
 const val NARRATOR = "Narrator"
 

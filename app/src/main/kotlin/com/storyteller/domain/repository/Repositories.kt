@@ -48,6 +48,26 @@ interface PagePlayer {
      */
     fun endOfPage()
     fun stop()
+
+    /**
+     * Milliseconds elapsed within the line currently sounding, or 0 when none is.
+     *
+     * Within the ITEM, not the playlist: word highlighting needs an offset into
+     * the clip it is highlighting, and Media3 reports exactly that. Defaulted so a
+     * player that cannot report a position - or a test fake that does not care -
+     * simply reads as 0, which highlights nothing rather than highlighting wrongly.
+     */
+    fun positionMs(): Int = 0
+
+    /**
+     * Length of the line currently sounding, or 0 when unknown.
+     *
+     * Only the estimator needs this, and only for clips with no stored alignment.
+     * Zero reads as "cannot estimate", which shows no accent rather than a wrong
+     * one - Media3 reports an unset duration as TIME_UNSET, which must not be
+     * mistaken for a real length.
+     */
+    fun durationMs(): Int = 0
 }
 
 interface SettingsRepository {
