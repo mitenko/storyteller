@@ -368,7 +368,7 @@ five separate stalls later.
 | D3 | At a fourth book: refuse, or evict least-recently-read | Shapes M6B.2 and M8.6 |
 | D4 | Word timing: ElevenLabs alignment, or estimate from characters | Changes all of M4 |
 | D5 | Audition line: fixed sample, page's shortest line, or the line in hand | Sets the cost of M3.7 |
-| D6 | Which THREE voices a character is offered | Sets M3.5; see M3's own section |
+| D6 | Which THREE voices a character is offered | **answered** — current + two contrasting, per character, excluding voices already taken |
 
 Suggested for a personal build: **per page**, **manual**, **refuse**, **alignment
 with the estimator as fallback**, **page's shortest line**.
@@ -452,13 +452,41 @@ is the whole design:
 - it caps the audition cost at three clips per character rather than twenty-one
 - and it makes the screen fit on a phone without a list
 
-### D6 — which three? (decision, no code)
+### D6 — which three? **answered 2026-09-12**
 
-The current voice plus two alternatives is the obvious answer, and the alternatives
-should be *audibly* different rather than the next two in the list — a child cannot
-tell two similar voices apart from one sample each. Deciding this well probably
-means listening to the 21 once and picking a contrasting trio per rough type
-(higher, lower, gruffer), rather than taking whatever the API returns first.
+The account exposes 21 voices, and the API carries labels for each — gender, age,
+accent, a descriptive word, and a use case. Read rather than guessed:
+
+| voice | gender | age | character |
+|---|---|---|---|
+| Jessica | female | young | cute |
+| Callum | male | middle | husky, **characters_animation** |
+| Harry | male | young | rough, **characters_animation** |
+| Bill | male | **old** | crisp, wise |
+| Lily | female | middle | confident, British |
+| River | **neutral** | middle | calm |
+
+**The three are per CHARACTER, not a global trio.** This is the part the phrase
+"limit to three options" hides: if every character is offered the same three, a book
+can only ever contain three distinct voices, and a page with six characters has them
+colliding two-to-one. Each character gets its own three.
+
+**The three are: the voice it already has, plus two that contrast with it** — and
+neither alternative may be a voice already assigned to another character on the same
+page. Contrast is measured on the labels, not on the name: differ on gender or age
+first, since those are what a four-year-old can actually hear apart. Two voices are
+explicitly labelled `characters_animation` (Callum, Harry) and are worth preferring
+for characters over the conversational and social-media ones.
+
+**Why not simply show all 21.** A child choosing between three is choosing; between
+twenty-one they are scrolling. It also caps the audition cost at three clips per
+character instead of twenty-one, and it fits a phone screen without a list.
+
+**The risk to watch:** excluding voices already taken means the offered trio depends
+on the order characters are assigned, so the same character can be offered different
+alternatives on different pages. That is acceptable — the *current* voice is always
+one of the three, so nothing a child has chosen ever disappears — but it should be
+stated in the UI's copy rather than discovered.
 
 | id | task | size |
 |---|---|---|
