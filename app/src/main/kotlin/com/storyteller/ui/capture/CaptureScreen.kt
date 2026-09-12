@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -80,30 +81,44 @@ fun CaptureScreen(
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
-        when (val current = state) {
-            CaptureUiState.Idle -> ScanPrompt(onScan = startScan)
-            is CaptureUiState.Failed -> ScanFailed(reason = current.reason, onRetry = startScan)
-            // No review step. The ML Kit scanner already ends in its own
-            // confirm-or-retake screen, so a second "is this page alright?" made a
-            // child approve the same photograph twice to hear one page read. The
-            // scan now goes straight to the reader.
-            //
-            // Keyed on the image so a NEW scan re-fires this; onHandedOff() then
-            // returns the screen to Idle, without which coming back for the next
-            // page would bounce straight into the reader again.
-            is CaptureUiState.Captured -> LaunchedEffect(current.image) {
-                confirmAndNavigate(viewModel, onNavigateToReader)
-                viewModel.onHandedOff()
+    // Scaffold, for the window insets rather than for a bar. This screen carried a
+    // bare Box until the icons were found sitting under the status bar and the camera
+    // cutout on a Pixel - 16dp from the top of the WINDOW, not from below the system
+    // bars. ReaderFrame's kdoc already states the rule this screen was the last to
+    // follow: Scaffold owns the insets so content does not have to guess at them.
+    //
+    // No topBar: the capture screen is deliberately bare, one instruction and one
+    // button, and a title above it would say nothing a child can read.
+    Scaffold { padding ->
+        Box(
+            Modifier
+                .fillMaxSize()
+                .padding(padding),
+        ) {
+            when (val current = state) {
+                CaptureUiState.Idle -> ScanPrompt(onScan = startScan)
+                is CaptureUiState.Failed -> ScanFailed(reason = current.reason, onRetry = startScan)
+                // No review step. The ML Kit scanner already ends in its own
+                // confirm-or-retake screen, so a second "is this page alright?" made a
+                // child approve the same photograph twice to hear one page read. The
+                // scan now goes straight to the reader.
+                //
+                // Keyed on the image so a NEW scan re-fires this; onHandedOff() then
+                // returns the screen to Idle, without which coming back for the next
+                // page would bounce straight into the reader again.
+                is CaptureUiState.Captured -> LaunchedEffect(current.image) {
+                    confirmAndNavigate(viewModel, onNavigateToReader)
+                    viewModel.onHandedOff()
+                }
             }
-        }
 
-        Row(modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)) {
-            IconButton(onClick = onOpenLibrary) {
-                Icon(painter = painterResource(R.drawable.ic_library), contentDescription = "Pages you have read")
-            }
-            IconButton(onClick = onOpenSettings) {
-                Icon(painter = painterResource(R.drawable.ic_settings), contentDescription = "Settings")
+            Row(modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)) {
+                IconButton(onClick = onOpenLibrary) {
+                    Icon(painter = painterResource(R.drawable.ic_library), contentDescription = "Pages you have read")
+                }
+                IconButton(onClick = onOpenSettings) {
+                    Icon(painter = painterResource(R.drawable.ic_settings), contentDescription = "Settings")
+                }
             }
         }
     }

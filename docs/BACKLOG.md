@@ -40,6 +40,9 @@ best argument for running G.
 | 13 | WiFi pre-check | S | — | No surprise mobile-data spend |
 | **15** | **Say non-words as sounds (M10A)** | S | — | **done, unheard** — "MM?" hums instead of spelling "em-em" |
 | **16** | **Real sound effects for POW/BOOM (M10B)** | M | — | A crash sounds like a crash, and costs no synthesis |
+| **17** | **Know the page kind (M11)** | M | — | Prose, comic and illustrated text stop being treated as one thing |
+| **18** | **Show the first panel sooner (M12)** | M | probe | Streaming the parse, if the API allows it at all |
+| **19** | **Make the wait feel like something (M13)** | S | — | The child's own photograph during the read, not a grey spinner |
 | **14** | **Bold the word as it is read** | M | — | A pre-reader can follow the words, not just hear them |
 
 Recommended order is at the bottom, with reasoning.
@@ -697,3 +700,105 @@ child prefers the word read dramatically to a canned crash.
 **Both depend on M4's word timings only loosely:** a substituted effect has no word
 alignment, so the accent simply does not apply to it, which the existing null path
 already handles.
+
+## M11 — Know what kind of page this is
+
+The prompt opens "This is a photograph of one page from a children's storybook or
+graphic novel" and then asks for a speech-balloon box and a comic-panel box for
+every unit. That is three different kinds of page treated as one:
+
+- **A graphic novel page** — panels, balloons, several speakers. What the reader
+  was designed around.
+- **A full page of prose** — no panels, no balloons, one voice. Every unit comes
+  back with `panel: null` and `bounds: null` or a box around a paragraph, and the
+  reader falls back to text-only cards. It works, and it asks the model for two
+  boxes per unit that cannot exist.
+- **Text with an illustration** — one picture, text beside or below it. Today the
+  picture is either missed entirely or returned as a single whole-page "panel",
+  which §18.2 of the bubble-box issue records the model doing.
+
+| id | task | size |
+|---|---|---|
+| M11.1 | Ask the model to classify the page, one field, in the call it already makes | XS |
+| M11.2 | Carry the kind through `ParsedPage` to the reader | S |
+| M11.3 | Prose: stop asking for panel boxes, and read paragraphs rather than balloons | S |
+| M11.4 | Illustrated text: one picture for the page, not one per line | S |
+| M11.5 | Reader renders each kind appropriately | S |
+| M11.6 | Test: a classified prose page requests no panel boxes | S |
+| M11.7 | Measure on one page of each kind, the three already in the bundles | S |
+
+**Cheap because the call already exists.** Classification is one more field on a
+response the app already pays for — the same trick that made the character roster
+nearly free. No extra call, no extra image.
+
+**The risk is a wrong classification, not a missing one.** A graphic novel read as
+prose loses every picture; prose read as a graphic novel asks for boxes that do not
+exist and renders text-only anyway. The second failure is survivable and the first
+is not, so when the model is unsure the answer should be "graphic novel" and the
+existing null-panel fallback should do the rest.
+
+## M12 — Show the first panel sooner
+
+**What is already true, so nobody optimises it twice.** Panels do NOT wait for
+audio: `PipelineState.Preparing` carries every unit as soon as the parse returns,
+and the reader renders them immediately, greyed until each line's audio lands.
+Crop decoding is already per-card and off-thread — `PanelCard` decodes in
+`produceState` on `Dispatchers.Default`, so the first panel's picture never waits
+for the tenth.
+
+**What actually costs the wait: the vision call is atomic.** `PageReaderImpl` makes
+one request and parses one complete JSON body, so nothing at all can render until
+the model has finished the whole page. On a ten-unit page that is the entire delay
+a child sits through, and it is the only remaining place to win.
+
+The fix is to stream it. Anthropic's API supports server-sent events, and the
+response is a JSON array of units — so units can be surfaced as they arrive rather
+than after the last one.
+
+| id | task | size |
+|---|---|---|
+| M12.1 | Probe: does streaming with a JSON-schema response actually yield usable partial units? | XS |
+| M12.2 | Stream the vision response instead of awaiting the whole body | S |
+| M12.3 | Parse units incrementally, tolerating a half-written object | S |
+| M12.4 | Emit `Preparing` as units arrive, not once at the end | S |
+| M12.5 | Start synthesising unit 0 before unit N has been parsed | S |
+| M12.6 | Keep the diagnostic bundle whole — it records the RAW response | S |
+| M12.7 | Test: a page renders its first panel before the last unit is parsed | S |
+
+**M12.1 first, and it may kill the rest.** Structured outputs and streaming do not
+always compose: if the service only emits the JSON once complete, there is nothing
+to stream and the milestone is dead. One probe answers it, the same way M10A.1 did.
+
+**A real cost to weigh:** the diagnostic bundle is the app's only window into what
+the model actually said, and it currently records one complete raw response.
+Streaming must not fragment that — §20.1 of the bubble-box issue is a whole section
+about a field going missing from a bundle and the hours it cost.
+
+## M13 — Make the wait feel like something
+
+While the vision call is in flight the reader shows a spinner and the words
+"Reading the page…". A child who has just photographed a page is shown a grey
+circle and no evidence their photograph was taken at all.
+
+Show them their own photograph instead, with a colour wash moving over it, so the
+wait reads as the app *looking at the page they just took*.
+
+| id | task | size |
+|---|---|---|
+| M13.1 | Carry the captured image on `PipelineState.Reading` | S |
+| M13.2 | Render the photograph behind the reading state | S |
+| M13.3 | Animate a colour sweep over it, respecting reduced-motion settings | S |
+| M13.4 | Fall back to today's spinner when there is no image | S |
+| M13.5 | Test: the reading state shows the photograph when one exists, and does not crash without one | S |
+
+**One structural note.** `PipelineState.Reading` is a `data object` and carries
+nothing. `Preparing` already carries `image`, and its kdoc says why it is required
+rather than defaulted: "a call site that forgets to pass it should fail to compile
+rather than silently ship a page nobody can crop a bubble from." `Reading` should
+follow that, which turns it from an object into a data class — a small change that
+touches every branch matching on it.
+
+**Worth doing after M12, not before.** If streaming lands, this wait gets much
+shorter and an elaborate animation over a one-second gap is wasted work. If M12.1
+says streaming is impossible, this becomes the only thing that improves that wait
+and is worth more.
