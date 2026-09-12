@@ -8,7 +8,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.storyteller.data.local.CachedAudioDao
 import com.storyteller.data.local.CachedAudioEntity
 import com.storyteller.data.local.StorytellerDatabase
-import com.storyteller.data.sha256
+import com.storyteller.domain.sha256
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin

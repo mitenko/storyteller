@@ -53,6 +53,7 @@ class FakePipeline : ReadingPipeline {
     override fun start(image: PageImage) = Unit
     override fun retry() { retries++ }
     override fun reset() = Unit
+    override fun openStored(units: List<SpeechUnit>, image: PageImage) = Unit
 
     /** Convenience for tests that only care about pushing one state at a time. */
     fun emit(state: PipelineState) { states.value = state }

@@ -33,13 +33,16 @@ best argument for running G.
 | 6 | Vocative prompt fix | **XS** | — | Measured: 69% → 81% speaker accuracy |
 | 7 | Re-size the token budget for #6 | **XS** | — | Keeps the guard's thinking from crowding out the answer |
 | 8 | Panel-scoped speaker ID + location | L | 3 | Where the speaker stands in the picture |
-| **9** | **Choose the voice reading a character** | M | 3 | A wrong or disliked voice becomes pickable, not random |
+| **9** | **Badge per line → pick from three voices** | M | 3 | Tap the name above a line and change that character's voice |
 | 10 | Book recognition (auto) | L | 4 | No manual "which book is this" |
 | 11 | Multiple profiles | M | 2 | Two children, two libraries |
 | 12 | Device-TTS fallback | M | — | Works offline / when ElevenLabs is down |
 | 13 | WiFi pre-check | S | — | No surprise mobile-data spend |
 | **15** | **Say non-words as sounds (M10A)** | S | — | **done, unheard** — "MM?" hums instead of spelling "em-em" |
-| **16** | **Real sound effects for POW/BOOM (M10B)** | M | — | A crash sounds like a crash, and costs no synthesis |
+| **16** | **Recognise onomatopoeia, play real sounds (M10B)** | M | 17 (M11) | A crash sounds like a crash, and costs no synthesis |
+| **17** | **Know the page kind (M11)** | M | — | Prose, comic and illustrated text stop being treated as one thing |
+| **18** | **Show the first panel sooner (M12)** | M | probe | Streaming the parse, if the API allows it at all |
+| **19** | **Make the wait feel like something (M13)** | S | — | The child's own photograph during the read, not a grey spinner |
 | **14** | **Bold the word as it is read** | M | — | A pre-reader can follow the words, not just hear them |
 
 Recommended order is at the bottom, with reasoning.
@@ -365,6 +368,7 @@ five separate stalls later.
 | D3 | At a fourth book: refuse, or evict least-recently-read | Shapes M6B.2 and M8.6 |
 | D4 | Word timing: ElevenLabs alignment, or estimate from characters | Changes all of M4 |
 | D5 | Audition line: fixed sample, page's shortest line, or the line in hand | Sets the cost of M3.7 |
+| D6 | Which THREE voices a character is offered | Sets M3.5; see M3's own section |
 
 Suggested for a personal build: **per page**, **manual**, **refuse**, **alignment
 with the estimator as fallback**, **page's shortest line**.
@@ -423,27 +427,67 @@ assigns the same voices both times. Do not migrate the voice table before the
 ID and repeated-read tests pass; otherwise persistence can make a bad identity
 decision permanent.
 
-## M3 — Voice picker (needs M2)
+## M3 — A badge per line, and three voices to choose from (needs M2)
 
-Split the picker into identity-safe selection first and audio refresh second.
-The first part is useful once M2 is complete; whole-page re-synthesis should
-wait until stored-page ownership exists so changed audio has a durable home.
+**The entry point is the line itself.** Every text row carries a badge naming who
+speaks it; tapping the badge opens a screen offering **three** voices for that
+character. Not a settings page listing the cast — the child taps the name they are
+looking at.
+
+**Text, not a portrait.** `PROJECT.md` records that a character "badge" already
+existed once — a small cropped portrait, with a `character_voice.badgePath` column
+that a migration later dropped. This is not that coming back. It is the speaker's
+name, styled as a badge and made tappable. No image, no new column.
+
+**Half of it is already on screen.** `ReaderScreen.kt:448` renders
+`Text(line.speaker, style = labelLarge)` above every line. What is missing is that
+it looks like a label rather than a control, and nothing happens when a child
+presses it.
+
+**Three options, not twenty-one.** The account currently exposes 21 voices. Three
+is the whole design:
+
+- a child choosing between three voices is choosing; choosing between twenty-one is
+  scrolling
+- it caps the audition cost at three clips per character rather than twenty-one
+- and it makes the screen fit on a phone without a list
+
+### D6 — which three? (decision, no code)
+
+The current voice plus two alternatives is the obvious answer, and the alternatives
+should be *audibly* different rather than the next two in the list — a child cannot
+tell two similar voices apart from one sample each. Deciding this well probably
+means listening to the 21 once and picking a contrasting trio per rough type
+(higher, lower, gruffer), rather than taking whatever the API returns first.
 
 | id | task | size |
 |---|---|---|
 | M3.1 | Store voice **names** alongside ids in `voice_list` | S |
-| M3.2 | Choose the audition line per D5 | XS |
-| M3.3 | Synthesise and cache one audition clip per candidate voice | S |
-| M3.4 | Picker route and entry point from the reader | S |
-| M3.5 | Picker UI: this page's characters and current voice | S |
-| M3.6 | Play a candidate on tap | S |
-| M3.7 | Compare several voices back to back on one line | S |
-| M3.8 | Write the choice through, overriding the random assignment | S |
-| M3.9 | Test: a chosen voice survives a re-read | S |
-| M3.10 | Test: choosing does not re-synthesise unchanged lines | S |
-| M3.11 | Re-request audio for lines whose voice changed, after M5 | S |
+| M3.2 | Make the speaker label a badge — visibly a control, big enough for a child | S |
+| M3.3 | Badge opens the voice screen for THAT character | S |
+| M3.4 | Voice route, and a way back that does not lose the reading position | S |
+| M3.5 | Offer exactly three voices per D6, current one marked | S |
+| M3.6 | Choose the audition line per D5 | XS |
+| M3.7 | Synthesise and cache one audition clip per offered voice | S |
+| M3.8 | Play a candidate on tap, and let them be compared back to back | S |
+| M3.9 | Write the choice through, overriding the random assignment | S |
+| M3.10 | Test: the badge names the speaker of its own line, not the page's first | S |
+| M3.11 | Test: a chosen voice survives a re-read | S |
+| M3.12 | Test: choosing does not re-synthesise unchanged lines | S |
+| M3.13 | Re-request audio for lines whose voice changed, after M5 | S |
 
-**Done when** a disliked voice can be changed and stays changed.
+**Done when** a child can tap the name above a line, hear three voices, pick one,
+and have that character keep it.
+
+**It rests entirely on M2.** The badge shows `line.speaker`, but the voice is keyed
+on the reconciled `voiceKey`, and those are deliberately different things — the
+displayed label drifts between reads ("the boy with brown hair", "the boy in the
+green shirt") while the key does not. A picker that wrote against the displayed
+string would undo exactly what M2 was built to fix.
+
+**One thing to watch on a real page.** A page of pure narration has one badge
+repeated down the whole screen, and a crowded comic page can have six different
+ones. Both want checking on a device before the styling is settled.
 
 ## M4A — Word timing data — **done 2026-09-11**
 
@@ -620,6 +664,22 @@ essential.
 
 **M9 last, and possibly never.** Nothing above depends on any of it.
 
+## Where the later milestones fall
+
+The two tracks above were written when the list ended at M9. M10-M13 were added
+afterwards and slot in like this:
+
+- **M10A** — done, bar hearing it on a device (M10A.6).
+- **M11 (page kind)** — before **M10B**, which is gated on it: on a page of prose a
+  capitalised word is just a word. M11 is cheap, since classification is one more
+  field on a call already paid for.
+- **M12.1 (streaming probe)** — worth running early precisely because it is XS and
+  may kill M12 outright. Its answer also decides how much **M13** is worth.
+- **M10B, M12.2-12.7, M13** — after their gates, in that order.
+
+None of these block M3, M5, M6, M7 or M8, so they can be pulled forward whenever
+appetite favours something visible over something structural.
+
 ## M10 — Lines that are not ordinary speech
 
 Comics are full of text that is not a sentence, and the reader currently sends all
@@ -671,29 +731,166 @@ adding a measurement beside it. `OK` is kept in the tests as the cautionary case
 lower-casing it is exactly the plausible-looking change that makes a common word
 worse.
 
-### M10B — Play a real sound for POW and BOOM
+### M10B — Recognise onomatopoeia and play the real sound
 
-A sound effect read aloud in a character voice is not a sound effect. `POW`,
-`BOOM`, `CRASH`, `PAF`, `FOOMP` want a noise, not a narrator.
+A sound effect read aloud in a character voice is not a sound effect. `BOOM` wants
+an explosion; `SKRIEEECH` wants tyres. Today the narrator says the word.
+
+**A lookup table cannot do this, and the evidence is already in the repository.**
+Sweeping every pulled diagnostic bundle for sound effects turns up:
+
+```
+PAF!   FOOMP!   FOOMP!!   K-CHUNG!   WHIRRRRR   KRRKKRKK   KRRKR.
+```
+
+`KRRKKRKK` is in no dictionary and no hardcoded list would ever have anticipated
+it. Comics invent their spelling every time, which is the whole charm of them.
+
+**And they cannot be detected by shape either.** The same sweep, filtering on
+"short, all-capitals, no lowercase", also returned `DOWN!`, `HEY!`, `NO.`, `COME.`,
+`EAT.`, `GET DOWN!` — ordinary dialogue, indistinguishable from `FOOMP!` to any
+regex, because comics letter *everything* in capitals. A rule that catches the
+sound effects also silences the dialogue.
+
+So the model classifies them. It is already reading the page and already returning
+these as `Narrator` units; one more field per unit says what KIND of noise it is —
+explosion, impact, screech, machine, footstep — and the app maps that small fixed
+set of CATEGORIES to bundled audio. Invented spellings then cost nothing, because
+nothing matches on the word.
+
+**One distinction the categories must carry: whose noise is it?** The same sweep
+found `ERGH!`, `GAH!`, `OOF!`, `UNGH!`, `MM?`, `SHH.` — a character grunting,
+wincing, hushing. Those are *vocal*, and replacing `GAH!` with a canned sound would
+strip a character of their voice mid-scene. Only environmental noises get replaced;
+vocal ones stay with the speaker, where M10A is already making them read properly.
+
+**Comic pages only** — hence the dependency on M11. On a page of prose, a capitalised
+word is a word.
 
 | id | task | size |
 |---|---|---|
-| M10B.1 | Decide the line: which words get a sound, and who says the rest | XS |
-| M10B.2 | Source or synthesise a small bundled set of effects | S |
-| M10B.3 | Match a unit's text to an effect, case and punctuation insensitive | S |
-| M10B.4 | Play the effect in place of synthesis, reusing the same playlist | S |
-| M10B.5 | Fall back to reading the word when no effect matches | S |
-| M10B.6 | Test: a matched unit costs no ElevenLabs call | S |
+| M10B.1 | Decide the category set, and which are vocal (never replaced) | XS |
+| M10B.2 | Ask the model to categorise each sound-effect unit, one field | XS |
+| M10B.3 | Source or synthesise one bundled clip per category | S |
+| M10B.4 | Map category to clip; unknown or absent category reads the word as today | S |
+| M10B.5 | Play the clip in place of synthesis, in the same playlist | S |
+| M10B.6 | Gate on M11 saying the page is a comic | S |
+| M10B.7 | Test: a categorised unit costs no ElevenLabs call | S |
+| M10B.8 | Test: a vocal interjection is NOT replaced | S |
+| M10B.9 | Measure on the rabbit page (4 effects) and the robot page (2) | S |
 
 **It saves money as well as sounding better.** Sound-effect units are pure cost
-today - one synthesis each, at ElevenLabs rates, to say "FOOMP" badly. The rabbit
+today — one synthesis each, at ElevenLabs rates, to say "FOOMP" badly. The rabbit
 page alone carries four.
 
-**M10B.1 is a product decision, not a technical one.** A bundled "POW" is one
-fixed noise for every book and every art style, where the narrator at least varies
-with the page. Worth hearing both before committing - and worth asking whether a
-child prefers the word read dramatically to a canned crash.
+**M10B.1 and M10B.3 are product decisions, not technical ones.** A bundled
+explosion is one fixed noise for every book and every art style, where the narrator
+at least varies with the page. And a real explosion behind a four-year-old's
+bedtime story may be less charming in practice than it sounds in a backlog. Worth
+hearing both before committing to a library of clips.
 
 **Both depend on M4's word timings only loosely:** a substituted effect has no word
 alignment, so the accent simply does not apply to it, which the existing null path
 already handles.
+
+## M11 — Know what kind of page this is
+
+The prompt opens "This is a photograph of one page from a children's storybook or
+graphic novel" and then asks for a speech-balloon box and a comic-panel box for
+every unit. That is three different kinds of page treated as one:
+
+- **A graphic novel page** — panels, balloons, several speakers. What the reader
+  was designed around.
+- **A full page of prose** — no panels, no balloons, one voice. Every unit comes
+  back with `panel: null` and `bounds: null` or a box around a paragraph, and the
+  reader falls back to text-only cards. It works, and it asks the model for two
+  boxes per unit that cannot exist.
+- **Text with an illustration** — one picture, text beside or below it. Today the
+  picture is either missed entirely or returned as a single whole-page "panel",
+  which §18.2 of the bubble-box issue records the model doing.
+
+| id | task | size |
+|---|---|---|
+| M11.1 | Ask the model to classify the page, one field, in the call it already makes | XS |
+| M11.2 | Carry the kind through `ParsedPage` to the reader | S |
+| M11.3 | Prose: stop asking for panel boxes, and read paragraphs rather than balloons | S |
+| M11.4 | Illustrated text: one picture for the page, not one per line | S |
+| M11.5 | Reader renders each kind appropriately | S |
+| M11.6 | Test: a classified prose page requests no panel boxes | S |
+| M11.7 | Measure on one page of each kind, the three already in the bundles | S |
+
+**Cheap because the call already exists.** Classification is one more field on a
+response the app already pays for — the same trick that made the character roster
+nearly free. No extra call, no extra image.
+
+**The risk is a wrong classification, not a missing one.** A graphic novel read as
+prose loses every picture; prose read as a graphic novel asks for boxes that do not
+exist and renders text-only anyway. The second failure is survivable and the first
+is not, so when the model is unsure the answer should be "graphic novel" and the
+existing null-panel fallback should do the rest.
+
+## M12 — Show the first panel sooner
+
+**What is already true, so nobody optimises it twice.** Panels do NOT wait for
+audio: `PipelineState.Preparing` carries every unit as soon as the parse returns,
+and the reader renders them immediately, greyed until each line's audio lands.
+Crop decoding is already per-card and off-thread — `PanelCard` decodes in
+`produceState` on `Dispatchers.Default`, so the first panel's picture never waits
+for the tenth.
+
+**What actually costs the wait: the vision call is atomic.** `PageReaderImpl` makes
+one request and parses one complete JSON body, so nothing at all can render until
+the model has finished the whole page. On a ten-unit page that is the entire delay
+a child sits through, and it is the only remaining place to win.
+
+The fix is to stream it. Anthropic's API supports server-sent events, and the
+response is a JSON array of units — so units can be surfaced as they arrive rather
+than after the last one.
+
+| id | task | size |
+|---|---|---|
+| M12.1 | Probe: does streaming with a JSON-schema response actually yield usable partial units? | XS |
+| M12.2 | Stream the vision response instead of awaiting the whole body | S |
+| M12.3 | Parse units incrementally, tolerating a half-written object | S |
+| M12.4 | Emit `Preparing` as units arrive, not once at the end | S |
+| M12.5 | Start synthesising unit 0 before unit N has been parsed | S |
+| M12.6 | Keep the diagnostic bundle whole — it records the RAW response | S |
+| M12.7 | Test: a page renders its first panel before the last unit is parsed | S |
+
+**M12.1 first, and it may kill the rest.** Structured outputs and streaming do not
+always compose: if the service only emits the JSON once complete, there is nothing
+to stream and the milestone is dead. One probe answers it, the same way M10A.1 did.
+
+**A real cost to weigh:** the diagnostic bundle is the app's only window into what
+the model actually said, and it currently records one complete raw response.
+Streaming must not fragment that — §20.1 of the bubble-box issue is a whole section
+about a field going missing from a bundle and the hours it cost.
+
+## M13 — Make the wait feel like something
+
+While the vision call is in flight the reader shows a spinner and the words
+"Reading the page…". A child who has just photographed a page is shown a grey
+circle and no evidence their photograph was taken at all.
+
+Show them their own photograph instead, with a colour wash moving over it, so the
+wait reads as the app *looking at the page they just took*.
+
+| id | task | size |
+|---|---|---|
+| M13.1 | Carry the captured image on `PipelineState.Reading` | S |
+| M13.2 | Render the photograph behind the reading state | S |
+| M13.3 | Animate a colour sweep over it, respecting reduced-motion settings | S |
+| M13.4 | Fall back to today's spinner when there is no image | S |
+| M13.5 | Test: the reading state shows the photograph when one exists, and does not crash without one | S |
+
+**One structural note.** `PipelineState.Reading` is a `data object` and carries
+nothing. `Preparing` already carries `image`, and its kdoc says why it is required
+rather than defaulted: "a call site that forgets to pass it should fail to compile
+rather than silently ship a page nobody can crop a bubble from." `Reading` should
+follow that, which turns it from an object into a data class — a small change that
+touches every branch matching on it.
+
+**Worth doing after M12, not before.** If streaming lands, this wait gets much
+shorter and an elaborate animation over a one-second gap is wasted work. If M12.1
+says streaming is impossible, this becomes the only thing that improves that wait
+and is worth more.
