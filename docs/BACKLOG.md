@@ -33,7 +33,7 @@ best argument for running G.
 | 6 | Vocative prompt fix | **XS** | — | Measured: 69% → 81% speaker accuracy |
 | 7 | Re-size the token budget for #6 | **XS** | — | Keeps the guard's thinking from crowding out the answer |
 | 8 | Panel-scoped speaker ID + location | L | 3 | Where the speaker stands in the picture |
-| **9** | **Choose the voice reading a character** | M | 3 | A wrong or disliked voice becomes pickable, not random |
+| **9** | **Badge per line → pick from three voices** | M | 3 | Tap the name above a line and change that character's voice |
 | 10 | Book recognition (auto) | L | 4 | No manual "which book is this" |
 | 11 | Multiple profiles | M | 2 | Two children, two libraries |
 | 12 | Device-TTS fallback | M | — | Works offline / when ElevenLabs is down |
@@ -368,6 +368,7 @@ five separate stalls later.
 | D3 | At a fourth book: refuse, or evict least-recently-read | Shapes M6B.2 and M8.6 |
 | D4 | Word timing: ElevenLabs alignment, or estimate from characters | Changes all of M4 |
 | D5 | Audition line: fixed sample, page's shortest line, or the line in hand | Sets the cost of M3.7 |
+| D6 | Which THREE voices a character is offered | Sets M3.5; see M3's own section |
 
 Suggested for a personal build: **per page**, **manual**, **refuse**, **alignment
 with the estimator as fallback**, **page's shortest line**.
@@ -426,27 +427,67 @@ assigns the same voices both times. Do not migrate the voice table before the
 ID and repeated-read tests pass; otherwise persistence can make a bad identity
 decision permanent.
 
-## M3 — Voice picker (needs M2)
+## M3 — A badge per line, and three voices to choose from (needs M2)
 
-Split the picker into identity-safe selection first and audio refresh second.
-The first part is useful once M2 is complete; whole-page re-synthesis should
-wait until stored-page ownership exists so changed audio has a durable home.
+**The entry point is the line itself.** Every text row carries a badge naming who
+speaks it; tapping the badge opens a screen offering **three** voices for that
+character. Not a settings page listing the cast — the child taps the name they are
+looking at.
+
+**Text, not a portrait.** `PROJECT.md` records that a character "badge" already
+existed once — a small cropped portrait, with a `character_voice.badgePath` column
+that a migration later dropped. This is not that coming back. It is the speaker's
+name, styled as a badge and made tappable. No image, no new column.
+
+**Half of it is already on screen.** `ReaderScreen.kt:448` renders
+`Text(line.speaker, style = labelLarge)` above every line. What is missing is that
+it looks like a label rather than a control, and nothing happens when a child
+presses it.
+
+**Three options, not twenty-one.** The account currently exposes 21 voices. Three
+is the whole design:
+
+- a child choosing between three voices is choosing; choosing between twenty-one is
+  scrolling
+- it caps the audition cost at three clips per character rather than twenty-one
+- and it makes the screen fit on a phone without a list
+
+### D6 — which three? (decision, no code)
+
+The current voice plus two alternatives is the obvious answer, and the alternatives
+should be *audibly* different rather than the next two in the list — a child cannot
+tell two similar voices apart from one sample each. Deciding this well probably
+means listening to the 21 once and picking a contrasting trio per rough type
+(higher, lower, gruffer), rather than taking whatever the API returns first.
 
 | id | task | size |
 |---|---|---|
 | M3.1 | Store voice **names** alongside ids in `voice_list` | S |
-| M3.2 | Choose the audition line per D5 | XS |
-| M3.3 | Synthesise and cache one audition clip per candidate voice | S |
-| M3.4 | Picker route and entry point from the reader | S |
-| M3.5 | Picker UI: this page's characters and current voice | S |
-| M3.6 | Play a candidate on tap | S |
-| M3.7 | Compare several voices back to back on one line | S |
-| M3.8 | Write the choice through, overriding the random assignment | S |
-| M3.9 | Test: a chosen voice survives a re-read | S |
-| M3.10 | Test: choosing does not re-synthesise unchanged lines | S |
-| M3.11 | Re-request audio for lines whose voice changed, after M5 | S |
+| M3.2 | Make the speaker label a badge — visibly a control, big enough for a child | S |
+| M3.3 | Badge opens the voice screen for THAT character | S |
+| M3.4 | Voice route, and a way back that does not lose the reading position | S |
+| M3.5 | Offer exactly three voices per D6, current one marked | S |
+| M3.6 | Choose the audition line per D5 | XS |
+| M3.7 | Synthesise and cache one audition clip per offered voice | S |
+| M3.8 | Play a candidate on tap, and let them be compared back to back | S |
+| M3.9 | Write the choice through, overriding the random assignment | S |
+| M3.10 | Test: the badge names the speaker of its own line, not the page's first | S |
+| M3.11 | Test: a chosen voice survives a re-read | S |
+| M3.12 | Test: choosing does not re-synthesise unchanged lines | S |
+| M3.13 | Re-request audio for lines whose voice changed, after M5 | S |
 
-**Done when** a disliked voice can be changed and stays changed.
+**Done when** a child can tap the name above a line, hear three voices, pick one,
+and have that character keep it.
+
+**It rests entirely on M2.** The badge shows `line.speaker`, but the voice is keyed
+on the reconciled `voiceKey`, and those are deliberately different things — the
+displayed label drifts between reads ("the boy with brown hair", "the boy in the
+green shirt") while the key does not. A picker that wrote against the displayed
+string would undo exactly what M2 was built to fix.
+
+**One thing to watch on a real page.** A page of pure narration has one badge
+repeated down the whole screen, and a crowded comic page can have six different
+ones. Both want checking on a device before the styling is settled.
 
 ## M4A — Word timing data — **done 2026-09-11**
 
@@ -622,6 +663,22 @@ experiment and should not block books unless re-photograph recognition proves
 essential.
 
 **M9 last, and possibly never.** Nothing above depends on any of it.
+
+## Where the later milestones fall
+
+The two tracks above were written when the list ended at M9. M10-M13 were added
+afterwards and slot in like this:
+
+- **M10A** — done, bar hearing it on a device (M10A.6).
+- **M11 (page kind)** — before **M10B**, which is gated on it: on a page of prose a
+  capitalised word is just a word. M11 is cheap, since classification is one more
+  field on a call already paid for.
+- **M12.1 (streaming probe)** — worth running early precisely because it is XS and
+  may kill M12 outright. Its answer also decides how much **M13** is worth.
+- **M10B, M12.2-12.7, M13** — after their gates, in that order.
+
+None of these block M3, M5, M6, M7 or M8, so they can be pulled forward whenever
+appetite favours something visible over something structural.
 
 ## M10 — Lines that are not ordinary speech
 
