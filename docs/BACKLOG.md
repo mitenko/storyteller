@@ -39,7 +39,7 @@ best argument for running G.
 | 12 | Device-TTS fallback | M | — | Works offline / when ElevenLabs is down |
 | 13 | WiFi pre-check | S | — | No surprise mobile-data spend |
 | **15** | **Say non-words as sounds (M10A)** | S | — | **done, unheard** — "MM?" hums instead of spelling "em-em" |
-| **16** | **Real sound effects for POW/BOOM (M10B)** | M | — | A crash sounds like a crash, and costs no synthesis |
+| **16** | **Recognise onomatopoeia, play real sounds (M10B)** | M | 17 (M11) | A crash sounds like a crash, and costs no synthesis |
 | **17** | **Know the page kind (M11)** | M | — | Prose, comic and illustrated text stop being treated as one thing |
 | **18** | **Show the first panel sooner (M12)** | M | probe | Streaming the parse, if the API allows it at all |
 | **19** | **Make the wait feel like something (M13)** | S | — | The child's own photograph during the read, not a grey spinner |
@@ -674,28 +674,63 @@ adding a measurement beside it. `OK` is kept in the tests as the cautionary case
 lower-casing it is exactly the plausible-looking change that makes a common word
 worse.
 
-### M10B — Play a real sound for POW and BOOM
+### M10B — Recognise onomatopoeia and play the real sound
 
-A sound effect read aloud in a character voice is not a sound effect. `POW`,
-`BOOM`, `CRASH`, `PAF`, `FOOMP` want a noise, not a narrator.
+A sound effect read aloud in a character voice is not a sound effect. `BOOM` wants
+an explosion; `SKRIEEECH` wants tyres. Today the narrator says the word.
+
+**A lookup table cannot do this, and the evidence is already in the repository.**
+Sweeping every pulled diagnostic bundle for sound effects turns up:
+
+```
+PAF!   FOOMP!   FOOMP!!   K-CHUNG!   WHIRRRRR   KRRKKRKK   KRRKR.
+```
+
+`KRRKKRKK` is in no dictionary and no hardcoded list would ever have anticipated
+it. Comics invent their spelling every time, which is the whole charm of them.
+
+**And they cannot be detected by shape either.** The same sweep, filtering on
+"short, all-capitals, no lowercase", also returned `DOWN!`, `HEY!`, `NO.`, `COME.`,
+`EAT.`, `GET DOWN!` — ordinary dialogue, indistinguishable from `FOOMP!` to any
+regex, because comics letter *everything* in capitals. A rule that catches the
+sound effects also silences the dialogue.
+
+So the model classifies them. It is already reading the page and already returning
+these as `Narrator` units; one more field per unit says what KIND of noise it is —
+explosion, impact, screech, machine, footstep — and the app maps that small fixed
+set of CATEGORIES to bundled audio. Invented spellings then cost nothing, because
+nothing matches on the word.
+
+**One distinction the categories must carry: whose noise is it?** The same sweep
+found `ERGH!`, `GAH!`, `OOF!`, `UNGH!`, `MM?`, `SHH.` — a character grunting,
+wincing, hushing. Those are *vocal*, and replacing `GAH!` with a canned sound would
+strip a character of their voice mid-scene. Only environmental noises get replaced;
+vocal ones stay with the speaker, where M10A is already making them read properly.
+
+**Comic pages only** — hence the dependency on M11. On a page of prose, a capitalised
+word is a word.
 
 | id | task | size |
 |---|---|---|
-| M10B.1 | Decide the line: which words get a sound, and who says the rest | XS |
-| M10B.2 | Source or synthesise a small bundled set of effects | S |
-| M10B.3 | Match a unit's text to an effect, case and punctuation insensitive | S |
-| M10B.4 | Play the effect in place of synthesis, reusing the same playlist | S |
-| M10B.5 | Fall back to reading the word when no effect matches | S |
-| M10B.6 | Test: a matched unit costs no ElevenLabs call | S |
+| M10B.1 | Decide the category set, and which are vocal (never replaced) | XS |
+| M10B.2 | Ask the model to categorise each sound-effect unit, one field | XS |
+| M10B.3 | Source or synthesise one bundled clip per category | S |
+| M10B.4 | Map category to clip; unknown or absent category reads the word as today | S |
+| M10B.5 | Play the clip in place of synthesis, in the same playlist | S |
+| M10B.6 | Gate on M11 saying the page is a comic | S |
+| M10B.7 | Test: a categorised unit costs no ElevenLabs call | S |
+| M10B.8 | Test: a vocal interjection is NOT replaced | S |
+| M10B.9 | Measure on the rabbit page (4 effects) and the robot page (2) | S |
 
 **It saves money as well as sounding better.** Sound-effect units are pure cost
-today - one synthesis each, at ElevenLabs rates, to say "FOOMP" badly. The rabbit
+today — one synthesis each, at ElevenLabs rates, to say "FOOMP" badly. The rabbit
 page alone carries four.
 
-**M10B.1 is a product decision, not a technical one.** A bundled "POW" is one
-fixed noise for every book and every art style, where the narrator at least varies
-with the page. Worth hearing both before committing - and worth asking whether a
-child prefers the word read dramatically to a canned crash.
+**M10B.1 and M10B.3 are product decisions, not technical ones.** A bundled
+explosion is one fixed noise for every book and every art style, where the narrator
+at least varies with the page. And a real explosion behind a four-year-old's
+bedtime story may be less charming in practice than it sounds in a backlog. Worth
+hearing both before committing to a library of clips.
 
 **Both depend on M4's word timings only loosely:** a substituted effect has no word
 alignment, so the accent simply does not apply to it, which the existing null path
