@@ -14,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SettingEntity::class,
         StoredPageEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 abstract class StorytellerDatabase : RoomDatabase() {
@@ -96,6 +96,32 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
             "CREATE TABLE IF NOT EXISTS `stored_page` " +
                 "(`id` TEXT NOT NULL, `photoPath` TEXT NOT NULL, `unitsJson` TEXT NOT NULL, " +
                 "`parseVersion` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        )
+    }
+}
+
+/**
+ * Widens `voice_list` from an id-only CSV to a JSON list of profiles.
+ *
+ * The table is DROPPED rather than converted. It is a cache of GET /v1/voices, and
+ * converting would mean inventing the gender and age labels the old rows never
+ * carried - values that then decide which voices a child is offered. Dropping it
+ * costs one API call on next launch.
+ *
+ * `character_voice` is deliberately untouched. That table is the child's own
+ * choices; clearing it here would silently re-randomise every character, which is
+ * the exact harm MIGRATION_4_5 accepted once and must not repeat casually.
+ *
+ * Column order and types must match what Room generates for VoiceListEntity, or
+ * validation fails on open.
+ */
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("DROP TABLE IF EXISTS `voice_list`")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `voice_list` " +
+                "(`id` INTEGER NOT NULL, `voicesJson` TEXT NOT NULL, " +
+                "`fetchedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
         )
     }
 }

@@ -4,6 +4,7 @@ import com.storyteller.data.local.CharacterVoiceEntity
 import com.storyteller.data.local.VoiceDao
 import com.storyteller.data.local.VoiceListDao
 import com.storyteller.data.local.VoiceListEntity
+import com.storyteller.domain.model.VoiceProfile
 import com.storyteller.domain.repository.VoiceRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
@@ -36,7 +37,7 @@ class VoiceRepositoryImpl(
                 voiceDao.find(character)?.let { return@withLock it.voiceId }
                 val pool = voicePool()
                 require(pool.isNotEmpty()) { "ElevenLabs returned no voices" }
-                val chosen = pool[random.nextInt(pool.size)]
+                val chosen = pool[random.nextInt(pool.size)].id
                 voiceDao.upsert(CharacterVoiceEntity(character, chosen))
                 chosen
             },
@@ -47,15 +48,28 @@ class VoiceRepositoryImpl(
         Result.failure(e)
     }
 
-    private suspend fun voicePool(): List<String> {
+    /**
+     * The account's voices, from cache when it holds any and from the network
+     * otherwise. An unreadable cached row decodes as empty, which lands here as a
+     * miss and refetches - a corrupt cache costs one call, not every voice.
+     */
+    internal suspend fun voicePool(): List<VoiceProfile> {
         voiceListDao.get()?.let { cached ->
-            val ids = cached.voiceIdsCsv.split(",").filter { it.isNotBlank() }
-            if (ids.isNotEmpty()) return ids
+            val profiles = decodeProfiles(cached.voicesJson)
+            if (profiles.isNotEmpty()) return profiles
         }
-        val ids = api.voices().voices.map { it.voiceId }
+        val profiles = api.voices().voices.map { dto ->
+            VoiceProfile(
+                id = dto.voiceId,
+                name = dto.name,
+                gender = dto.labels["gender"].orEmpty(),
+                age = dto.labels["age"].orEmpty(),
+                useCase = dto.labels["use_case"].orEmpty(),
+            )
+        }
         voiceListDao.put(
-            VoiceListEntity(voiceIdsCsv = ids.joinToString(","), fetchedAt = System.currentTimeMillis()),
+            VoiceListEntity(voicesJson = encodeProfiles(profiles), fetchedAt = System.currentTimeMillis()),
         )
-        return ids
+        return profiles
     }
 }
