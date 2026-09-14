@@ -1878,7 +1878,11 @@ was not run is reported as not run.
   already-deferred M5 minor "re-saving a page under the same id orphans the previous
   version's clips" — M3 makes it reachable by tapping rather than only by retrying a
   failure. Not fixed here; worth a backlog line.
-- **No spend cap.** Changing a voice on a ten-line page buys ten clips, and nothing
-  in this app limits how often that can happen. M3 is the first feature that lets a
-  child spend money by tapping rather than by photographing. Stated in the spec's
-  risks and unaddressed by this plan.
+- **No spend cap.** M3 is the first feature that lets a child spend money by tapping
+  rather than by photographing, and nothing in this app limits how often that can
+  happen. Unaddressed by this plan.
+
+  *Corrected after Task 7 measured it:* this said "changing a voice on a ten-line
+  page buys ten clips". It buys only that character's lines — two of four in
+  `ReadingPipelineVoiceChangeTest`. Ten is the worst case, and its real shape is a
+  prose page whose narrator says nearly everything.
