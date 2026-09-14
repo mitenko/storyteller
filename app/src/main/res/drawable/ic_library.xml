@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Three shelved bars, standing in for a stack of read pages. Kept as a local
+  vector for the same reason ic_settings.xml is: material3 ships no library
+  glyph in its core icon set. Tinted by Compose's Icon, so the fill is left
+  white.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M3,4h18v3H3z" />
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M3,10.5h18v3H3z" />
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M3,17h18v3H3z" />
+</vector>

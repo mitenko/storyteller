@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import com.storyteller.domain.ReadingPipeline
 import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.PipelineState
+import com.storyteller.domain.model.SpeechUnit
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,6 +22,7 @@ class RecordingPipeline : ReadingPipeline {
     override fun start(image: PageImage) { started += image }
     override fun retry() = Unit
     override fun reset() { resets++ }
+    override fun openStored(units: List<SpeechUnit>, image: PageImage) = Unit
 }
 
 @RunWith(RobolectricTestRunner::class)

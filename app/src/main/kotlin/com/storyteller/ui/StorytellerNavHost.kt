@@ -5,6 +5,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.storyteller.ui.capture.CaptureScreen
+import com.storyteller.ui.library.LibraryScreen
 import com.storyteller.ui.reader.ReaderScreen
 import com.storyteller.ui.settings.SettingsScreen
 
@@ -12,6 +13,7 @@ object Routes {
     const val CAPTURE = "capture"
     const val READER = "reader"
     const val SETTINGS = "settings"
+    const val LIBRARY = "library"
 }
 
 @Composable
@@ -22,6 +24,7 @@ fun StorytellerNavHost() {
             CaptureScreen(
                 onNavigateToReader = { nav.navigate(Routes.READER) },
                 onOpenSettings = { nav.navigate(Routes.SETTINGS) },
+                onOpenLibrary = { nav.navigate(Routes.LIBRARY) },
             )
         }
         composable(Routes.READER) {
@@ -31,6 +34,12 @@ fun StorytellerNavHost() {
         }
         composable(Routes.SETTINGS) {
             SettingsScreen(onBack = { nav.popBackStack() })
+        }
+        composable(Routes.LIBRARY) {
+            LibraryScreen(
+                onBack = { nav.popBackStack() },
+                onOpenPage = { nav.navigate(Routes.READER) },
+            )
         }
     }
 }

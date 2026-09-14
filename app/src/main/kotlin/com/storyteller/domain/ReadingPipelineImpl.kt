@@ -9,6 +9,7 @@ import com.storyteller.domain.model.PreparedUnit
 import com.storyteller.domain.model.SpeechUnit
 import com.storyteller.domain.repository.AudioRepository
 import com.storyteller.domain.repository.PageReader
+import com.storyteller.domain.repository.StoredPageRepository
 import com.storyteller.domain.repository.VoiceRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -31,6 +32,11 @@ class ReadingPipelineImpl(
     private val voices: VoiceRepository,
     private val audio: AudioRepository,
     private val scope: CoroutineScope,
+    /**
+     * Null in tests that do not care about the library. A pipeline with no library
+     * reads pages perfectly well and simply forgets them.
+     */
+    private val library: StoredPageRepository? = null,
 ) : ReadingPipeline {
 
     private val _state = MutableStateFlow<PipelineState>(PipelineState.Idle)
@@ -61,9 +67,17 @@ class ReadingPipelineImpl(
      */
     private var epoch = 0L
 
+    /**
+     * Whether the page in flight came from the library. A stored page must not be
+     * saved again: it would take a new timestamp and jump to the front of a library
+     * that is ordered by when a page was READ, not by when it was last opened.
+     */
+    private var fromLibrary = false
+
     override fun start(image: PageImage) {
         synchronized(lock) {
             lastImage = image
+            fromLibrary = false
             job?.cancel()
             val myEpoch = ++epoch
             job = scope.launch { guarded(myEpoch) { run(image, myEpoch) } }
@@ -84,6 +98,22 @@ class ReadingPipelineImpl(
                     } else {
                         run(image, myEpoch)
                     }
+                }
+            }
+        }
+    }
+
+    override fun openStored(units: List<SpeechUnit>, image: PageImage) {
+        synchronized(lock) {
+            lastImage = image
+            fromLibrary = true
+            parsed = units
+            job?.cancel()
+            val myEpoch = ++epoch
+            job = scope.launch {
+                guarded(myEpoch) {
+                    setState(myEpoch, PipelineState.Preparing(units, emptyList(), image))
+                    prepareAll(units, myEpoch, image)
                 }
             }
         }
@@ -173,7 +203,39 @@ class ReadingPipelineImpl(
             ready += prepared
             setState(myEpoch, PipelineState.Preparing(units, ready.toList(), image))
         }
-        setState(myEpoch, PipelineState.Ready(ready.toList(), image))
+        val finished = ready.toList()
+        if (!fromLibrary) {
+            // The id is plain sha256(image.bytes), deliberately NOT what
+            // PageReaderImpl's parse cache keys on (sha256(bytes + modelId)). The
+            // model id belongs in the parse-cache key, because switching vision
+            // models must invalidate a cached parse; it must be absent here,
+            // because switching models must not orphan a page already in a
+            // child's library — the transcript is what was read aloud, not the
+            // model that produced it. Same reasoning the spec already applies to
+            // parseVersion. The id only has to be stable and unique per page
+            // image.
+            //
+            // Saving is best-effort and wrapped so it can never turn a
+            // successful read into a reported failure: library.save() does real
+            // I/O (writing the photo, a Room upsert) and can throw on a full
+            // disk or a corrupt database. Without this catch, that throw would
+            // escape into guarded()'s Throwable handler and overwrite the Ready
+            // state below with Failed — the child would hear the whole page read
+            // perfectly and then be shown a failure. A page that was read but
+            // not remembered is a far better outcome than a page that was read
+            // and then reported broken. Cancellation is still rethrown, matching
+            // every other guard in this class; there is no domain-safe logger to
+            // report the swallowed failure to, since domain must not import
+            // android.util.Log.
+            try {
+                library?.save(sha256(image.bytes), image, finished)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                // Swallowed deliberately — see comment above.
+            }
+        }
+        setState(myEpoch, PipelineState.Ready(finished, image))
     }
 
     /**

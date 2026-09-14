@@ -78,4 +78,12 @@ interface StoredPageDao {
 
     @Query("DELETE FROM stored_page WHERE id = :id")
     suspend fun delete(id: String)
+
+    /**
+     * The same ordering as [observeAll], read once. Eviction and clip accounting
+     * need a snapshot, and collecting a Flow to get one invites a deadlock inside
+     * a suspend function that is already holding the caller's coroutine.
+     */
+    @Query("SELECT * FROM stored_page ORDER BY createdAt DESC")
+    suspend fun observeAllOnce(): List<StoredPageEntity>
 }

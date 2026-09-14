@@ -10,6 +10,7 @@ import com.storyteller.data.local.MIGRATION_4_5
 import com.storyteller.data.local.MIGRATION_5_6
 import com.storyteller.data.local.ParsedPageDao
 import com.storyteller.data.local.SettingsDao
+import com.storyteller.data.local.StoredPageDao
 import com.storyteller.data.local.StorytellerDatabase
 import com.storyteller.data.local.VoiceDao
 import com.storyteller.data.local.VoiceListDao
@@ -37,6 +38,7 @@ object DatabaseModule {
     @Provides fun cachedAudioDao(db: StorytellerDatabase): CachedAudioDao = db.cachedAudioDao()
     @Provides fun voiceListDao(db: StorytellerDatabase): VoiceListDao = db.voiceListDao()
     @Provides fun settingsDao(db: StorytellerDatabase): SettingsDao = db.settingsDao()
+    @Provides fun storedPageDao(db: StorytellerDatabase): StoredPageDao = db.storedPageDao()
 
     /** filesDir, not cacheDir: the OS must not be able to purge paid-for audio. */
     @Provides @Singleton @Named("audioDir")

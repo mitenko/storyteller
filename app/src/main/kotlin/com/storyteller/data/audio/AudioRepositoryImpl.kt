@@ -3,7 +3,7 @@ package com.storyteller.data.audio
 import com.storyteller.data.local.CachedAudioDao
 import com.storyteller.data.local.CachedAudioEntity
 import android.util.Base64
-import com.storyteller.data.sha256
+import com.storyteller.domain.sha256
 import com.storyteller.domain.model.WordTiming
 import com.storyteller.domain.model.wordTimingsFrom
 import com.storyteller.domain.repository.AudioRepository
