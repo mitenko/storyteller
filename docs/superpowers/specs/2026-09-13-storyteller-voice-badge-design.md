@@ -168,11 +168,20 @@ every other clip is already cached and stays.
 
 ## Risks
 
-**Re-synthesis cost is real and unbounded.** A child who changes a voice on a
-ten-line page buys ten clips. A child who does it repeatedly buys them repeatedly.
-There is no spend cap anywhere in this app — the single largest gap in it — and this
-feature is the first that lets a child spend money by tapping rather than by
-photographing.
+**Re-synthesis cost is real and unbounded in the dimension that matters.**
+
+*Corrected after measurement.* An earlier draft said a child changing a voice on a
+ten-line page buys ten clips. That is the worst case, not the case: changing one
+character's voice re-buys only THAT character's lines — two of four in
+`ReadingPipelineVoiceChangeTest`. Ten needs one speaker to own all ten lines.
+
+That worst case is a prose page, where the narrator says nearly everything and now
+has a badge of its own. So one change costs the number of lines that speaker owns:
+small on a comic page, close to the whole page on prose.
+
+What is genuinely unbounded is HOW OFTEN. There is no spend cap anywhere in this app
+— the single largest gap in it — and this feature is the first that lets a
+child spend money by tapping rather than by photographing.
 
 **The offered pair is order-dependent.** Excluding taken voices means the same
 character can see different alternatives on different pages. The current voice is
