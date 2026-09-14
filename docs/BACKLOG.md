@@ -486,7 +486,7 @@ assigns the same voices both times. Do not migrate the voice table before the
 ID and repeated-read tests pass; otherwise persistence can make a bad identity
 decision permanent.
 
-## M3 — A badge per line, and three voices to choose from (needs M2)
+## M3 — A badge per line, and three voices to choose from — **done 2026-09-14, PR #9** (device check unrun)
 
 **The entry point is the line itself.** Every text row carries a badge naming who
 speaks it; tapping the badge opens a screen offering **three** voices for that
@@ -633,13 +633,13 @@ timings still plays, and the phone does not get warm.
 
 ## M6A — Storage limits for loose pages
 
-| id | task | size |
-|---|---|---|
-| M6.1 | Measure real audio bytes per page on the device | XS |
-| M6.2 | A configurable size ceiling | S |
-| M6.3 | LRU eviction over loose audio and photos | S |
-| M6.4 | Define atomic cleanup of a page record, photo, and owned audio | S |
-| M6.5 | Test loose-page eviction and cleanup | S |
+| id | task | size | notes |
+|---|---|---|---|
+| M6.1 | Measure real bytes per page | XS | **done 2026-09-14** — [the measurement](../issues/2026-09-14-page-storage-measured.md). ~1.8 MB/page, 84% photograph; fifty pages ≈ 91 MB. Audio remains estimated |
+| M6.2 | A configurable size ceiling | S | In BYTES. A count cannot promise a ceiling: measured pages range 1.21–2.05 MB |
+| M6.3 | LRU eviction over loose audio and photos | S | Photographs first; audio is a sixth of the problem |
+| M6.4 | Define atomic cleanup of a page record, photo, and owned audio | S | Largely exists — `StoredPageRepositoryImpl.delete` |
+| M6.5 | Test loose-page eviction and cleanup | S | Assert on bytes, with sizes drawn from the measured range |
 
 ## M6B — Book-protected storage
 
