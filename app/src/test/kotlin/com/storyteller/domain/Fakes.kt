@@ -3,7 +3,10 @@ package com.storyteller.domain
 import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.ParsedPage
 import com.storyteller.domain.model.SpeechUnit
+import com.storyteller.domain.model.VoiceChoice
+import com.storyteller.domain.model.VoiceProfile
 import com.storyteller.domain.model.characterKey
+import com.storyteller.domain.model.chooseTrio
 import com.storyteller.domain.repository.AudioRepository
 import com.storyteller.domain.repository.PageReader
 import com.storyteller.domain.repository.VoiceRepository
@@ -55,10 +58,32 @@ class FakePageReader(
     }
 }
 
-class FakeVoiceRepository(private val fail: Set<String> = emptySet()) : VoiceRepository {
+/**
+ * [assigned] is a real map, not a formula, because M3's whole point is that a voice
+ * can be OVERWRITTEN - a fake that derives its answer from the character name
+ * cannot represent that, and would pass every picker test regardless.
+ */
+class FakeVoiceRepository(
+    private val fail: Set<String> = emptySet(),
+    private val pool: List<VoiceProfile> = emptyList(),
+    var failAssign: Boolean = false,
+) : VoiceRepository {
+    val assigned = mutableMapOf<String, String>()
+    val choicesAskedWith = mutableListOf<Pair<String, Set<String>>>()
+
     override suspend fun voiceFor(character: String): Result<String> =
         if (character in fail) Result.failure(IllegalStateException("no voice"))
-        else Result.success("voice-$character")
+        else Result.success(assigned.getOrPut(character) { "voice-$character" })
+
+    override suspend fun choicesFor(character: String, taken: Set<String>): Result<List<VoiceChoice>> {
+        choicesAskedWith += character to taken
+        val current = voiceFor(character).getOrElse { return Result.failure(it) }
+        return Result.success(chooseTrio(pool, current, taken))
+    }
+
+    override suspend fun assign(character: String, voiceId: String): Result<Unit> =
+        if (failAssign) Result.failure(IllegalStateException("disk full"))
+        else { assigned[character] = voiceId; Result.success(Unit) }
 }
 
 /**
@@ -74,12 +99,40 @@ class FakeAudioRepository(
     private var inFlight = 0
     private val lock = Mutex()
 
+    /**
+     * Every (text, voice) pair asked for, and the clips already bought.
+     *
+     * Keyed on the PAIR, not the text, because the real cache is keyed
+     * sha256(voiceId|text): a fake that keyed on text alone could not tell a
+     * re-buy in a changed voice from a cache hit, which is precisely the claim M3
+     * rests on.
+     */
+    val requestedPairs = mutableListOf<Pair<String, String>>()
+    private val cache = mutableMapOf<Pair<String, String>, File>()
+
+    /** Distinct (text, voice) pairs bought - what a real cache would have charged for. */
+    val synthesisCount: Int get() = cache.size
+
+    /** Fails only this voice, so a test can kill one card and leave the others alive. */
+    var failOnlyForVoice: String? = null
+
     override suspend fun audioFor(text: String, voiceId: String): Result<File> {
-        lock.withLock { inFlight++; maxInFlight = maxOf(maxInFlight, inFlight); requested += text }
+        val key = text to voiceId
+        lock.withLock {
+            inFlight++
+            maxInFlight = maxOf(maxInFlight, inFlight)
+            requested += text
+            requestedPairs += key
+        }
         try {
+            cache[key]?.let { return Result.success(it) }
             delay(delays[text] ?: 10L)
-            if (text in failFor) return Result.failure(IllegalStateException("synthesis failed"))
-            return Result.success(File("/tmp/$voiceId-${text.hashCode()}.mp3"))
+            if (text in failFor || voiceId == failOnlyForVoice) {
+                return Result.failure(IllegalStateException("synthesis failed"))
+            }
+            val file = File("/tmp/$voiceId-${text.hashCode()}.mp3")
+            cache[key] = file
+            return Result.success(file)
         } finally {
             lock.withLock { inFlight-- }
         }

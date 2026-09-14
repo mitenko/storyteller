@@ -29,10 +29,18 @@ data class CachedAudioEntity(
     val createdAt: Long,
 )
 
+/**
+ * The account's voices, cached. A pure cache of GET /v1/voices: one row, refetched
+ * whenever it is missing or unreadable, and safe to drop at any time.
+ *
+ * [voicesJson] replaced an id-only CSV in v7. Ids alone cannot fill a picker - a
+ * child cannot choose between pqHfZKP75CvOlQylNhV4 and CwhRBWXzGAHq8TQ4Fs17 - and
+ * cannot be contrasted on gender or age.
+ */
 @Entity(tableName = "voice_list")
 data class VoiceListEntity(
     @PrimaryKey val id: Int = 1,
-    val voiceIdsCsv: String,
+    val voicesJson: String,
     val fetchedAt: Long,
 )
 

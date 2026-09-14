@@ -49,7 +49,8 @@ class ReaderScreenTest {
         bounds: BoundingBox? = null,
         audioReady: Boolean = true,
         panel: BoundingBox? = null,
-    ) = ReaderUiState.Line(index, speaker, text, bounds, audioReady, panel)
+        voiceKey: String = "wolf",
+    ) = ReaderUiState.Line(index, speaker, text, bounds, audioReady, panel, voiceKey = voiceKey)
 
     private fun playing(
         lines: List<ReaderUiState.Line>,
@@ -183,7 +184,7 @@ class ReaderScreenTest {
         val viewModel = ReaderViewModel(FakePipeline(), player, FakeSettingsRepository())
         var attached by mutableStateOf(true)
 
-        compose.setContent { if (attached) ReaderScreen(onBack = {}, viewModel = viewModel) }
+        compose.setContent { if (attached) ReaderScreen(onBack = {}, onOpenVoices = {}, viewModel = viewModel) }
         compose.waitForIdle()
 
         attached = false
@@ -550,5 +551,64 @@ class ReaderScreenTest {
             "tapping a line must clear the suspension, so a later playingIndex change scrolls again",
             listState.layoutInfo.visibleItemsInfo.any { it.index == 20 },
         )
+    }
+
+    /**
+     * The badge reports the KEY, not the label. The label drifts between reads of
+     * one page and the key does not; a picker keyed on the label would write a
+     * voice against a string the next read will not produce.
+     */
+    @Test fun `tapping a badge reports the line's voice key, not its speaker`() {
+        var reported: String? = null
+        compose.setContent {
+            LineRow(
+                line = line(
+                    speaker = "the pink rabbit with a bandaged ear",
+                    text = "Watch your step.",
+                    voiceKey = "cogsley",
+                ),
+                sounding = false,
+                onTap = {},
+                onBadgeTap = { reported = it },
+            )
+        }
+
+        compose.onNodeWithText("the pink rabbit with a bandaged ear").performClick()
+
+        assertEquals("cogsley", reported)
+    }
+
+    @Test fun `a badge names its own line, not the page's first`() {
+        compose.setContent {
+            LineRow(
+                line = line(speaker = "Bill", text = "Over here!", index = 3, voiceKey = "bill"),
+                sounding = false,
+                onTap = {},
+                onBadgeTap = {},
+            )
+        }
+        compose.onNodeWithText("Bill").assertIsDisplayed()
+    }
+
+    /**
+     * A line whose audio is still being synthesised is not tappable for PLAYBACK -
+     * there is nothing to play - but its voice can still be changed. Gating the
+     * badge on audioReady would make the picker unreachable during exactly the
+     * wait a child is most likely to fill by fiddling.
+     */
+    @Test fun `a badge works before the line's audio does`() {
+        var tapped = false
+        compose.setContent {
+            LineRow(
+                line = line(speaker = "Bill", text = "Over here!", audioReady = false, voiceKey = "bill"),
+                sounding = false,
+                onTap = {},
+                onBadgeTap = { tapped = true },
+            )
+        }
+
+        compose.onNodeWithText("Bill").performClick()
+
+        assertTrue(tapped)
     }
 }

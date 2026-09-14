@@ -129,4 +129,51 @@ class MigrationTest {
             }
         }
     }
+
+    /**
+     * The voice LIST is a cache and is dropped; the voice MAP is a child's choices
+     * and must survive untouched. Getting these the wrong way round would silently
+     * re-randomise every character in the app.
+     */
+    @Test fun `widening the voice list keeps every voice already assigned`() {
+        context.deleteDatabase(name)
+        val callback = object : SupportSQLiteOpenHelper.Callback(6) {
+            override fun onCreate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `character_voice` " +
+                        "(`character` TEXT NOT NULL, `voiceId` TEXT NOT NULL, PRIMARY KEY(`character`))",
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `voice_list` " +
+                        "(`id` INTEGER NOT NULL, `voiceIdsCsv` TEXT NOT NULL, " +
+                        "`fetchedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+                )
+            }
+            override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+        }
+        FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context).name(name).callback(callback).build(),
+        ).use { helper ->
+            val db = helper.writableDatabase
+            db.execSQL("INSERT INTO character_voice VALUES ('cogsley', 'v9')")
+            db.execSQL("INSERT INTO voice_list VALUES (1, 'v1,v2,v3', 42)")
+
+            MIGRATION_6_7.migrate(db)
+
+            db.query("SELECT voiceId FROM character_voice WHERE character = 'cogsley'").use { c ->
+                c.moveToFirst()
+                assertEquals("a child's chosen voices must survive a cache widening", "v9", c.getString(0))
+            }
+            db.query("SELECT COUNT(*) FROM voice_list").use { c ->
+                c.moveToFirst()
+                assertEquals("the stale id-only cache goes, and is refetched", 0, c.getInt(0))
+            }
+            // And the new shape is usable, not merely present.
+            db.execSQL("INSERT INTO voice_list VALUES (1, '[{\"id\":\"v1\",\"name\":\"Roger\"}]', 43)")
+            db.query("SELECT voicesJson FROM voice_list").use { c ->
+                c.moveToFirst()
+                assertEquals("[{\"id\":\"v1\",\"name\":\"Roger\"}]", c.getString(0))
+            }
+        }
+    }
 }

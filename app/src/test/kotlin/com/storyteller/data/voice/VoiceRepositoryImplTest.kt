@@ -154,4 +154,79 @@ class VoiceRepositoryImplTest {
         override suspend fun count(): Int = 0
         override suspend fun upsert(entity: CharacterVoiceEntity) = Unit
     }
+
+    private val labelled = """
+        {"voices":[
+          {"voice_id":"m-mid","name":"Roger - Laid-Back","labels":{"gender":"male","age":"middle_aged"}},
+          {"voice_id":"f-young","name":"Jessica","labels":{"gender":"female","age":"young"}},
+          {"voice_id":"m-old","name":"Bill","labels":{"gender":"male","age":"old"}}
+        ]}
+    """.trimIndent()
+
+    @Test fun `assign overwrites a voice already chosen`() = runTest {
+        server.enqueue(MockResponse(body = labelled))
+        val r = repo()
+
+        // Overwrites a voice that was assigned the ordinary way - at random, on
+        // first sight - which is the case that matters. The target is whatever the
+        // roll did NOT produce, so the test proves a change whatever the seed does;
+        // naming a fixed target made it vacuous the moment the roll matched it.
+        val first = r.voiceFor("cogsley").getOrThrow()
+        val other = setOf("m-mid", "f-young", "m-old").first { it != first }
+
+        r.assign("cogsley", other).getOrThrow()
+
+        assertEquals(other, r.voiceFor("cogsley").getOrThrow())
+    }
+
+    @Test fun `choices lead with the voice the character already speaks in`() = runTest {
+        server.enqueue(MockResponse(body = labelled))
+        val r = repo()
+        r.assign("cogsley", "m-mid").getOrThrow()
+
+        val choices = r.choicesFor("cogsley", taken = emptySet()).getOrThrow()
+
+        assertEquals("m-mid", choices.first().id)
+        assertTrue(choices.first().isCurrent)
+        assertEquals("Roger", choices.first().name)
+    }
+
+    @Test fun `choices exclude a voice another character speaks in`() = runTest {
+        server.enqueue(MockResponse(body = labelled))
+        val r = repo()
+        r.assign("cogsley", "m-mid").getOrThrow()
+
+        val choices = r.choicesFor("cogsley", taken = setOf("f-young")).getOrThrow()
+
+        assertTrue(choices.none { it.id == "f-young" })
+    }
+
+    /**
+     * A character with no voice yet - a badge tapped before synthesis reached that
+     * line. Asking for choices must assign one rather than failing, so what the
+     * screen shows as "current" is the voice the page will actually use.
+     */
+    @Test fun `choices for an unknown character assign a voice first`() = runTest {
+        server.enqueue(MockResponse(body = labelled))
+        val r = repo()
+
+        val choices = r.choicesFor("stranger", taken = emptySet()).getOrThrow()
+
+        assertEquals(choices.first().id, r.voiceFor("stranger").getOrThrow())
+    }
+
+    /**
+     * Offline. The current voice alone is a true and useful answer: nothing a
+     * child chose is lost, and the screen says the others cannot be reached.
+     */
+    @Test fun `an unreachable voice list still offers the current voice alone`() = runTest {
+        val r = repo()
+        r.assign("cogsley", "m-mid").getOrThrow()
+        server.enqueue(MockResponse(code = 500))
+
+        val choices = r.choicesFor("cogsley", taken = emptySet()).getOrThrow()
+
+        assertEquals(listOf("m-mid"), choices.map { it.id })
+        assertTrue(choices.first().isCurrent)
+    }
 }

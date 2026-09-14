@@ -59,8 +59,8 @@ class DaoTest {
     @Test fun `voice list stores a single row`() = runTest {
         val dao = db.voiceListDao()
         assertNull(dao.get())
-        dao.put(VoiceListEntity(voiceIdsCsv = "a,b,c", fetchedAt = 1000L))
-        dao.put(VoiceListEntity(voiceIdsCsv = "d,e", fetchedAt = 2000L))
-        assertEquals("d,e", dao.get()?.voiceIdsCsv)
+        dao.put(VoiceListEntity(voicesJson = """[{"id":"a","name":"A"}]""", fetchedAt = 1000L))
+        dao.put(VoiceListEntity(voicesJson = """[{"id":"d","name":"D"}]""", fetchedAt = 2000L))
+        assertEquals("""[{"id":"d","name":"D"}]""", dao.get()?.voicesJson)
     }
 }
