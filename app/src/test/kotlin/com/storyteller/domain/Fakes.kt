@@ -99,12 +99,40 @@ class FakeAudioRepository(
     private var inFlight = 0
     private val lock = Mutex()
 
+    /**
+     * Every (text, voice) pair asked for, and the clips already bought.
+     *
+     * Keyed on the PAIR, not the text, because the real cache is keyed
+     * sha256(voiceId|text): a fake that keyed on text alone could not tell a
+     * re-buy in a changed voice from a cache hit, which is precisely the claim M3
+     * rests on.
+     */
+    val requestedPairs = mutableListOf<Pair<String, String>>()
+    private val cache = mutableMapOf<Pair<String, String>, File>()
+
+    /** Distinct (text, voice) pairs bought - what a real cache would have charged for. */
+    val synthesisCount: Int get() = cache.size
+
+    /** Fails only this voice, so a test can kill one card and leave the others alive. */
+    var failOnlyForVoice: String? = null
+
     override suspend fun audioFor(text: String, voiceId: String): Result<File> {
-        lock.withLock { inFlight++; maxInFlight = maxOf(maxInFlight, inFlight); requested += text }
+        val key = text to voiceId
+        lock.withLock {
+            inFlight++
+            maxInFlight = maxOf(maxInFlight, inFlight)
+            requested += text
+            requestedPairs += key
+        }
         try {
+            cache[key]?.let { return Result.success(it) }
             delay(delays[text] ?: 10L)
-            if (text in failFor) return Result.failure(IllegalStateException("synthesis failed"))
-            return Result.success(File("/tmp/$voiceId-${text.hashCode()}.mp3"))
+            if (text in failFor || voiceId == failOnlyForVoice) {
+                return Result.failure(IllegalStateException("synthesis failed"))
+            }
+            val file = File("/tmp/$voiceId-${text.hashCode()}.mp3")
+            cache[key] = file
+            return Result.success(file)
         } finally {
             lock.withLock { inFlight-- }
         }
