@@ -4,7 +4,9 @@ import com.storyteller.data.local.CharacterVoiceEntity
 import com.storyteller.data.local.VoiceDao
 import com.storyteller.data.local.VoiceListDao
 import com.storyteller.data.local.VoiceListEntity
+import com.storyteller.domain.model.VoiceChoice
 import com.storyteller.domain.model.VoiceProfile
+import com.storyteller.domain.model.chooseTrio
 import com.storyteller.domain.repository.VoiceRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
@@ -71,5 +73,49 @@ class VoiceRepositoryImpl(
             VoiceListEntity(voicesJson = encodeProfiles(profiles), fetchedAt = System.currentTimeMillis()),
         )
         return profiles
+    }
+
+    /**
+     * Assigns a voice first when the character has none. A badge can be tapped on a
+     * line whose synthesis has not reached it, so the character may be genuinely
+     * unseen - and showing "current" for a voice the page will not use would be a
+     * lie the child then hears.
+     *
+     * An unreachable voice list is not a failure: the current voice alone is a
+     * true, useful answer. Cancellation is still rethrown.
+     *
+     * NOTE the lock discipline. voiceFor takes [lock] on its miss path, and Mutex
+     * is NOT reentrant - so this calls voiceFor BEFORE taking any lock, and assign
+     * takes the lock without calling voiceFor. Nesting either inside the other
+     * would deadlock the picker permanently.
+     */
+    override suspend fun choicesFor(character: String, taken: Set<String>): Result<List<VoiceChoice>> = try {
+        val current = voiceFor(character).getOrThrow()
+        val pool = try {
+            voicePool()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            emptyList()
+        }
+        Result.success(chooseTrio(pool, current, taken))
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Throwable) {
+        Result.failure(e)
+    }
+
+    /**
+     * Taken under the same lock voiceFor assigns under: a write racing a
+     * first-sight assignment for the same character must not interleave, or the
+     * child's choice loses to a random one.
+     */
+    override suspend fun assign(character: String, voiceId: String): Result<Unit> = try {
+        lock.withLock { voiceDao.upsert(CharacterVoiceEntity(character, voiceId)) }
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Throwable) {
+        Result.failure(e)
     }
 }

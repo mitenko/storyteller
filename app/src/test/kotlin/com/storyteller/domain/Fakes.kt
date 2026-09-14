@@ -3,7 +3,10 @@ package com.storyteller.domain
 import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.ParsedPage
 import com.storyteller.domain.model.SpeechUnit
+import com.storyteller.domain.model.VoiceChoice
+import com.storyteller.domain.model.VoiceProfile
 import com.storyteller.domain.model.characterKey
+import com.storyteller.domain.model.chooseTrio
 import com.storyteller.domain.repository.AudioRepository
 import com.storyteller.domain.repository.PageReader
 import com.storyteller.domain.repository.VoiceRepository
@@ -55,10 +58,32 @@ class FakePageReader(
     }
 }
 
-class FakeVoiceRepository(private val fail: Set<String> = emptySet()) : VoiceRepository {
+/**
+ * [assigned] is a real map, not a formula, because M3's whole point is that a voice
+ * can be OVERWRITTEN - a fake that derives its answer from the character name
+ * cannot represent that, and would pass every picker test regardless.
+ */
+class FakeVoiceRepository(
+    private val fail: Set<String> = emptySet(),
+    private val pool: List<VoiceProfile> = emptyList(),
+    var failAssign: Boolean = false,
+) : VoiceRepository {
+    val assigned = mutableMapOf<String, String>()
+    val choicesAskedWith = mutableListOf<Pair<String, Set<String>>>()
+
     override suspend fun voiceFor(character: String): Result<String> =
         if (character in fail) Result.failure(IllegalStateException("no voice"))
-        else Result.success("voice-$character")
+        else Result.success(assigned.getOrPut(character) { "voice-$character" })
+
+    override suspend fun choicesFor(character: String, taken: Set<String>): Result<List<VoiceChoice>> {
+        choicesAskedWith += character to taken
+        val current = voiceFor(character).getOrElse { return Result.failure(it) }
+        return Result.success(chooseTrio(pool, current, taken))
+    }
+
+    override suspend fun assign(character: String, voiceId: String): Result<Unit> =
+        if (failAssign) Result.failure(IllegalStateException("disk full"))
+        else { assigned[character] = voiceId; Result.success(Unit) }
 }
 
 /**

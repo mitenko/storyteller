@@ -7,6 +7,7 @@ import com.storyteller.domain.model.PreparedUnit
 import com.storyteller.domain.model.ReadingMode
 import com.storyteller.domain.model.StoredPage
 import com.storyteller.domain.model.ThemeChoice
+import com.storyteller.domain.model.VoiceChoice
 import com.storyteller.domain.model.WordTiming
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,6 +21,21 @@ interface PageReader {
 /** Returns the voice for a character, assigning and persisting one on first sight. */
 interface VoiceRepository {
     suspend fun voiceFor(character: String): Result<String>
+
+    /**
+     * The voices offered for [character]: the one it already speaks in, then up to
+     * two contrasting alternatives, excluding every id in [taken] - the voices the
+     * other characters on the page in hand already use.
+     */
+    suspend fun choicesFor(character: String, taken: Set<String>): Result<List<VoiceChoice>>
+
+    /**
+     * Replaces the stored voice for [character].
+     *
+     * The only write path in the app that can overwrite a voice: voiceFor assigns
+     * once, on first sight, and never revisits.
+     */
+    suspend fun assign(character: String, voiceId: String): Result<Unit>
 }
 
 /** Returns a local audio file for the text in the given voice, synthesizing on a cache miss. */
