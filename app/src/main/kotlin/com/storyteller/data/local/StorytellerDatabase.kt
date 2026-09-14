@@ -13,8 +13,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         VoiceListEntity::class,
         SettingEntity::class,
         StoredPageEntity::class,
+        BookEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = false,
 )
 abstract class StorytellerDatabase : RoomDatabase() {
@@ -24,6 +25,7 @@ abstract class StorytellerDatabase : RoomDatabase() {
     abstract fun voiceListDao(): VoiceListDao
     abstract fun settingsDao(): SettingsDao
     abstract fun storedPageDao(): StoredPageDao
+    abstract fun bookDao(): BookDao
 }
 
 val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -149,5 +151,24 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
 val MIGRATION_7_8 = object : Migration(7, 8) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("DELETE FROM character_voice")
+    }
+}
+
+/**
+ * Adds `book`, and page membership on `stored_page`.
+ *
+ * Purely additive: both new columns are nullable with no default, so every page
+ * already stored simply reads as loose - which is exactly what it is. No child
+ * loses a page, a photograph or a clip.
+ */
+val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `book` " +
+                "(`id` TEXT NOT NULL, `title` TEXT NOT NULL, " +
+                "`createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        )
+        db.execSQL("ALTER TABLE `stored_page` ADD COLUMN `bookId` TEXT")
+        db.execSQL("ALTER TABLE `stored_page` ADD COLUMN `pageNumber` INTEGER")
     }
 }

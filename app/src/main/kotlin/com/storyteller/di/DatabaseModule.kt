@@ -10,8 +10,10 @@ import com.storyteller.data.local.MIGRATION_4_5
 import com.storyteller.data.local.MIGRATION_5_6
 import com.storyteller.data.local.MIGRATION_6_7
 import com.storyteller.data.local.MIGRATION_7_8
+import com.storyteller.data.local.MIGRATION_8_9
 import com.storyteller.data.local.ParsedPageDao
 import com.storyteller.data.local.SettingsDao
+import com.storyteller.data.local.BookDao
 import com.storyteller.data.local.StoredPageDao
 import com.storyteller.data.local.StorytellerDatabase
 import com.storyteller.data.local.VoiceDao
@@ -34,7 +36,8 @@ object DatabaseModule {
         Room.databaseBuilder(ctx, StorytellerDatabase::class.java, "storyteller.db")
             .addMigrations(
                 MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4,
-                MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
+                MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
+                MIGRATION_7_8, MIGRATION_8_9,
             )
             .build()
 
@@ -44,6 +47,7 @@ object DatabaseModule {
     @Provides fun voiceListDao(db: StorytellerDatabase): VoiceListDao = db.voiceListDao()
     @Provides fun settingsDao(db: StorytellerDatabase): SettingsDao = db.settingsDao()
     @Provides fun storedPageDao(db: StorytellerDatabase): StoredPageDao = db.storedPageDao()
+    @Provides fun bookDao(db: StorytellerDatabase): BookDao = db.bookDao()
 
     /** filesDir, not cacheDir: the OS must not be able to purge paid-for audio. */
     @Provides @Singleton @Named("audioDir")

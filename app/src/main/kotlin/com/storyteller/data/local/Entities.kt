@@ -80,4 +80,36 @@ data class StoredPageEntity(
     val unitsJson: String,
     val parseVersion: Int,
     val createdAt: Long,
+    /**
+     * The book this page belongs to, or null while it is loose.
+     *
+     * Nullable rather than a sentinel: "not in a book" is the state every page
+     * starts in and most pages stay in, and a null reads as that plainly. It also
+     * lets the storage cap tell the two apart - M6B protects book pages from the
+     * eviction that loose pages accept.
+     */
+    val bookId: String? = null,
+    /**
+     * Where this page sits in its book, or null when nobody has said.
+     *
+     * Null is ordinary and must stay usable: a child adds pages as they read them,
+     * in order, and being made to number each one would be worse than showing them
+     * in the order they were added. Unnumbered pages sort after numbered ones, by
+     * when they were read.
+     */
+    val pageNumber: Int? = null,
+)
+
+/**
+ * A book, holding pages already read.
+ *
+ * No page list here: membership lives on [StoredPageEntity.bookId], so a page
+ * belongs to exactly one book by construction and there is no join table to keep
+ * consistent with itself.
+ */
+@Entity(tableName = "book")
+data class BookEntity(
+    @PrimaryKey val id: String,
+    val title: String,
+    val createdAt: Long,
 )

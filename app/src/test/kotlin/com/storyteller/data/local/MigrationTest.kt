@@ -214,4 +214,43 @@ class MigrationTest {
             }
         }
     }
+
+    /**
+     * Books are purely additive. Both new columns are nullable with no default, so
+     * every page already stored reads as loose - which is what it is. No child loses
+     * a page, a photograph or a clip to gaining a bookshelf.
+     */
+    @Test fun `adding books leaves every stored page where it was`() {
+        context.deleteDatabase(name)
+        val callback = object : SupportSQLiteOpenHelper.Callback(8) {
+            override fun onCreate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `stored_page` " +
+                        "(`id` TEXT NOT NULL, `photoPath` TEXT NOT NULL, `unitsJson` TEXT NOT NULL, " +
+                        "`parseVersion` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+                )
+            }
+            override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+        }
+        FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context).name(name).callback(callback).build(),
+        ).use { helper ->
+            val db = helper.writableDatabase
+            db.execSQL("INSERT INTO stored_page VALUES ('abc', '/files/p.jpg', '[]', 10, 1)")
+
+            MIGRATION_8_9.migrate(db)
+
+            db.query("SELECT photoPath, bookId, pageNumber FROM stored_page").use { c ->
+                c.moveToFirst()
+                assertEquals("/files/p.jpg", c.getString(0))
+                assertEquals("a page that predates books is loose, not lost", true, c.isNull(1))
+                assertEquals(true, c.isNull(2))
+            }
+            db.execSQL("INSERT INTO book VALUES ('b1', 'Bone', 5)")
+            db.query("SELECT title FROM book").use { c ->
+                c.moveToFirst()
+                assertEquals("Bone", c.getString(0))
+            }
+        }
+    }
 }

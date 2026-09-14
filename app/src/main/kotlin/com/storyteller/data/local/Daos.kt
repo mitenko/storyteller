@@ -1,6 +1,7 @@
 package com.storyteller.data.local
 
 import androidx.room.Dao
+import androidx.room.Embedded
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
@@ -87,3 +88,67 @@ interface StoredPageDao {
     @Query("SELECT * FROM stored_page ORDER BY createdAt DESC")
     suspend fun observeAllOnce(): List<StoredPageEntity>
 }
+
+@Dao
+interface BookDao {
+    /**
+     * Newest first, with each book's page count computed IN the query.
+     *
+     * A correlated sub-select rather than a second lookup per book: counting in
+     * Kotlin would mean a suspend call inside a Flow's map, which does not compile,
+     * and counting eagerly at insert time would be a stored copy of a derivable
+     * truth - the thing StoredPage.audioNames deliberately avoids.
+     */
+    @Query(
+        "SELECT b.*, (SELECT COUNT(*) FROM stored_page p WHERE p.bookId = b.id) AS pageCount " +
+            "FROM book b ORDER BY b.createdAt DESC",
+    )
+    fun observeAll(): Flow<List<BookWithCount>>
+
+    @Query("SELECT * FROM book ORDER BY createdAt DESC")
+    suspend fun allOnce(): List<BookEntity>
+
+    @Query("SELECT * FROM book WHERE id = :id")
+    suspend fun find(id: String): BookEntity?
+
+    @Query("SELECT COUNT(*) FROM book")
+    suspend fun count(): Int
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insert(entity: BookEntity)
+
+    @Query("UPDATE book SET title = :title WHERE id = :id")
+    suspend fun rename(id: String, title: String)
+
+    @Query("DELETE FROM book WHERE id = :id")
+    suspend fun delete(id: String)
+
+    /**
+     * Numbered pages first in page order, then unnumbered ones oldest-first.
+     *
+     * Oldest-first here, against the library's newest-first: a book is read
+     * forwards. A child adding pages as they go should see them in the order they
+     * read them, not reversed.
+     */
+    @Query(
+        "SELECT * FROM stored_page WHERE bookId = :bookId " +
+            "ORDER BY pageNumber IS NULL, pageNumber ASC, createdAt ASC",
+    )
+    suspend fun pagesOf(bookId: String): List<StoredPageEntity>
+
+    @Query("SELECT COUNT(*) FROM stored_page WHERE bookId = :bookId")
+    suspend fun pageCount(bookId: String): Int
+
+    @Query("UPDATE stored_page SET bookId = :bookId, pageNumber = :pageNumber WHERE id = :pageId")
+    suspend fun setMembership(pageId: String, bookId: String?, pageNumber: Int?)
+
+    /** Loosens every page of a book, so deleting the book never deletes a page. */
+    @Query("UPDATE stored_page SET bookId = NULL, pageNumber = NULL WHERE bookId = :bookId")
+    suspend fun loosenPagesOf(bookId: String)
+}
+
+/** A book plus the number of pages in it, counted by the query rather than stored. */
+data class BookWithCount(
+    @Embedded val book: BookEntity,
+    val pageCount: Int,
+)

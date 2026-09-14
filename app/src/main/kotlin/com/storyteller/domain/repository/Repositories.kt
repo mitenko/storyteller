@@ -1,5 +1,6 @@
 package com.storyteller.domain.repository
 
+import com.storyteller.domain.model.Book
 import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.ParsedPage
 import com.storyteller.domain.model.PlaybackState
@@ -122,4 +123,31 @@ interface StoredPageRepository {
 
     /** Removes the row, its photograph, and any clip no other stored page needs. */
     suspend fun delete(id: String)
+}
+
+/**
+ * The books a child keeps, at most [com.storyteller.domain.model.MAX_BOOKS] of them.
+ */
+interface BookRepository {
+    /** Newest first. */
+    fun observeBooks(): Flow<List<Book>>
+
+    /**
+     * Makes a book, or fails with [com.storyteller.domain.model.BookRefused].
+     *
+     * Refuses rather than evicting at the cap - see MAX_BOOKS for why deleting a
+     * child's whole book to make room is the wrong trade.
+     */
+    suspend fun create(title: String): Result<Book>
+
+    /** Deletes the book. Its pages are LOOSENED, never deleted. */
+    suspend fun delete(id: String)
+
+    suspend fun rename(id: String, title: String): Result<Unit>
+
+    /** Puts a stored page in a book, or takes it out again with a null [bookId]. */
+    suspend fun setMembership(pageId: String, bookId: String?, pageNumber: Int? = null): Result<Unit>
+
+    /** The book's pages, in reading order. */
+    suspend fun pagesOf(bookId: String): List<StoredPage>
 }
