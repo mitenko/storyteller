@@ -44,6 +44,7 @@ best argument for running G.
 | **18** | **Show the first panel sooner (M12)** | M | probe | Streaming the parse, if the API allows it at all |
 | **19** | **Make the wait feel like something (M13)** | S | — | The child's own photograph during the read, not a grey spinner |
 | **14** | **Bold the word as it is read** | M | — | A pre-reader can follow the words, not just hear them |
+| **20** | **Cap the reading at three voices** | S | 9 (M3) | A child can tell the speakers apart, and voice-swapping stops costing money |
 
 Recommended order is at the bottom, with reasoning.
 
@@ -289,6 +290,64 @@ a page to watch the highlight costs nothing once the audio is kept.
 
 Already deferred. Small. Matters more once a whole book might be synthesised in one
 sitting.
+
+---
+
+## 20. Cap the reading at three voices *(asked for)*
+
+A page uses **at most three distinct voices**, however many characters speak on it.
+A fourth character shares with one of the three rather than drawing a fourth voice.
+
+**This reverses D6, deliberately.** D6 ruled the trio must be *per character*
+precisely because three-for-the-whole-book makes a six-character page collide
+two-to-one. That reasoning was about the picker, and it still holds for the picker.
+This is a different question: not *how many voices to offer* but *how many voices to
+use*, and three is a better answer than "as many as there are characters" for two
+reasons neither of which D6 weighed.
+
+**A four-year-old can follow three voices.** Six is not six characters to a small
+child, it is noise — and the account's pool makes it worse than the number suggests.
+Of the 21 voices, **13 are male, 7 female, 1 neutral** (measured 2026-09-14), so six
+random draws routinely produce three or four middle-aged American men who are
+genuinely hard to tell apart. Capping the palette lets the three be chosen to
+contrast, instead of hoping the draws do.
+
+**It bounds the spend hazard M3 opened.** M3 is the first feature that lets a child
+spend money by *tapping* rather than by photographing, and nothing caps that. With
+only three voices in play, a character has at most three targets — so once each
+voice has spoken a line, that line's clip is cached and **flipping between voices
+costs nothing at all**. The hazard is not removed, but it is bounded by a small
+constant instead of being unbounded. That is most of the value of a spend cap, for a
+fraction of the work, and it is worth doing whether or not a real cap follows.
+
+**It simplifies M3 rather than complicating it.** The picker currently excludes
+voices another character already speaks in (`chooseTrio`'s `taken` set). Under a cap
+the three offered voices *are* the three in play, sharing is the normal case rather
+than a collision to avoid, and the exclusion rule disappears. The picker gets
+simpler and more predictable at the same time: the same three, every character,
+every page.
+
+**The one real decision is who gets their own voice when there are more than three.**
+
+- **First three to speak.** Trivial, and wrong often enough to notice: a character
+  with one line in panel one takes a voice from the character who carries the page.
+- **By line count** — the three most talkative `voiceKey`s on the page get their own
+  voice, everyone else shares with the nearest. Feasible today: `toSpeechUnits`
+  produces every unit before `prepareAll` runs, so the counts are in hand before a
+  single clip is bought.
+- **Reserve one for the narrator.** Narration is usually the bulk of a prose page
+  and almost nothing on a comic page, so this is really a question the page-kind
+  work (#17 / M11) answers better than this feature can.
+
+Recommended: by line count, with the narrator counted as an ordinary speaker for
+now. It needs no new data, it is a pure function over units the pipeline already
+has, and it is cheap to revisit once M11 knows what kind of page it is looking at.
+
+**Open: page or book?** Three voices per *page* is what the pipeline can do today.
+Three per *book* is what a child would actually notice — a character must not change
+voice between page 4 and page 5. The voice map is already global and persistent, so
+in practice a character keeps its voice across pages anyway; what a cap per page
+cannot promise is that the *set* stays the same. This wants settling against M8.
 
 ---
 
@@ -922,3 +981,28 @@ touches every branch matching on it.
 shorter and an elaborate animation over a one-second gap is wasted work. If M12.1
 says streaming is impossible, this becomes the only thing that improves that wait
 and is worth more.
+
+---
+
+## M14 — Three voices, and no more (needs M3)
+
+A palette, not a picker change. The three voices in play on a page are chosen
+deliberately to contrast; every character maps onto one of them.
+
+Reverses D6 for the *palette* while leaving D6's answer for the *picker* intact —
+see feature #20 for why the two questions are different.
+
+| id | task | size | notes |
+|---|---|---|---|
+| M14.1 | Decide the allocation rule: which speakers get their own voice | S | Recommended in #20: by line count, narrator counted as an ordinary speaker. A decision, not code |
+| M14.2 | A pure `choosePalette(units, pool): Map<voiceKey, voiceId>` | M | Over units the pipeline already holds before `prepareAll`. No network, no DB, no screen — the same shape as `chooseTrio`, and testable the same way |
+| M14.3 | Route `prepare()`'s voice lookup through the palette | S | `voiceFor(unit.voiceKey ?: NARRATOR)` becomes a palette lookup with `voiceFor` as the fallback for a key the palette has no room for |
+| M14.4 | Drop `chooseTrio`'s `taken` exclusion | S | Under a cap, sharing is the normal case. The picker offers the three in play — removing a rule rather than adding one |
+| M14.5 | Test: a six-character page uses exactly three voices | S | The property the feature exists for |
+| M14.6 | Test: flipping a character between the three costs nothing after the first pass | S | The spend bound, measured on the same counting fake `ReadingPipelineVoiceChangeTest` uses |
+| M14.7 | Decide page-scope vs book-scope | S | Settle against M8. Recorded as open in #20 |
+
+**Where it falls.** After M3, which it modifies, and it wants doing *before* a real
+spend cap — it removes most of the same hazard for a fraction of the work, and a cap
+designed after it can be a smaller cap.
+
