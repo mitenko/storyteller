@@ -14,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SettingEntity::class,
         StoredPageEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = false,
 )
 abstract class StorytellerDatabase : RoomDatabase() {
@@ -123,5 +123,31 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
                 "(`id` INTEGER NOT NULL, `voicesJson` TEXT NOT NULL, " +
                 "`fetchedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
         )
+    }
+}
+
+/**
+ * Clears every remembered voice, so the three-voice cap actually applies.
+ *
+ * Every row in this table is a RANDOM draw from the 21-voice pool - `voiceFor`
+ * picked one on first sight and never revisited, and the picker that lets a person
+ * choose one has not shipped. So no row here was ever chosen by anybody, and
+ * clearing destroys nothing a human decided.
+ *
+ * Without this the feature would not work where it matters. A page whose cast was
+ * already assigned keeps its old spread of voices for ever, because
+ * spreadOverPalette deliberately never reassigns a remembered voice - and the
+ * device this app runs on has exactly such pages.
+ *
+ * This is the LAST time clearing is free. Once the picker ships, a row may be a
+ * choice a child made, and the same statement would then be destructive. Any later
+ * change to the palette must remap or migrate rather than clear.
+ *
+ * The cost is one re-assignment per character on the next read, which is what
+ * happens on any first read anyway.
+ */
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("DELETE FROM character_voice")
     }
 }

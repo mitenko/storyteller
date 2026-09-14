@@ -184,21 +184,52 @@ class VoiceRepositoryImplTest {
         val r = repo()
         r.assign("cogsley", "m-mid").getOrThrow()
 
-        val choices = r.choicesFor("cogsley", taken = emptySet()).getOrThrow()
+        val choices = r.choicesFor("cogsley").getOrThrow()
 
         assertEquals("m-mid", choices.first().id)
         assertTrue(choices.first().isCurrent)
         assertEquals("Roger", choices.first().name)
     }
 
-    @Test fun `choices exclude a voice another character speaks in`() = runTest {
+    /**
+     * Replaces `choices exclude a voice another character speaks in`, which the
+     * three-voice cap made wrong rather than merely unnecessary: under a cap the
+     * offered voices ARE the three in play, so a page with four speakers would have
+     * had nothing left to offer once the others were excluded.
+     */
+    @Test fun `choices are the palette, whoever else is speaking`() = runTest {
         server.enqueue(MockResponse(body = labelled))
         val r = repo()
         r.assign("cogsley", "m-mid").getOrThrow()
 
-        val choices = r.choicesFor("cogsley", taken = setOf("f-young")).getOrThrow()
+        val choices = r.choicesFor("cogsley").getOrThrow()
 
-        assertTrue(choices.none { it.id == "f-young" })
+        assertEquals("the current voice leads", "m-mid", choices.first().id)
+        assertEquals("three offers, and the pool has exactly three", 3, choices.size)
+    }
+
+    /**
+     * The cap, at the repository. Six characters, three voices, nobody voiceless.
+     */
+    @Test fun `a page of six characters resolves to three voices`() = runTest {
+        server.enqueue(MockResponse(body = labelled))
+        val r = repo()
+
+        val map = r.voicesFor(listOf("c1", "c2", "c3", "c4", "c5", "c6")).getOrThrow()
+
+        assertEquals(6, map.size)
+        assertEquals("three voices, no more", 3, map.values.distinct().size)
+    }
+
+    /** A voice a person chose is never pulled back into the palette. */
+    @Test fun `an off-palette chosen voice survives a page resolve`() = runTest {
+        server.enqueue(MockResponse(body = labelled))
+        val r = repo()
+        r.assign("cogsley", "off-palette-voice").getOrThrow()
+
+        val map = r.voicesFor(listOf("cogsley", "bill")).getOrThrow()
+
+        assertEquals("off-palette-voice", map["cogsley"])
     }
 
     /**
@@ -210,7 +241,7 @@ class VoiceRepositoryImplTest {
         server.enqueue(MockResponse(body = labelled))
         val r = repo()
 
-        val choices = r.choicesFor("stranger", taken = emptySet()).getOrThrow()
+        val choices = r.choicesFor("stranger").getOrThrow()
 
         assertEquals(choices.first().id, r.voiceFor("stranger").getOrThrow())
     }
@@ -224,7 +255,7 @@ class VoiceRepositoryImplTest {
         r.assign("cogsley", "m-mid").getOrThrow()
         server.enqueue(MockResponse(code = 500))
 
-        val choices = r.choicesFor("cogsley", taken = emptySet()).getOrThrow()
+        val choices = r.choicesFor("cogsley").getOrThrow()
 
         assertEquals(listOf("m-mid"), choices.map { it.id })
         assertTrue(choices.first().isCurrent)

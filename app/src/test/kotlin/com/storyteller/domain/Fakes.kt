@@ -7,6 +7,8 @@ import com.storyteller.domain.model.VoiceChoice
 import com.storyteller.domain.model.VoiceProfile
 import com.storyteller.domain.model.characterKey
 import com.storyteller.domain.model.chooseTrio
+import com.storyteller.domain.model.choosePalette
+import com.storyteller.domain.model.spreadOverPalette
 import com.storyteller.domain.repository.AudioRepository
 import com.storyteller.domain.repository.PageReader
 import com.storyteller.domain.repository.VoiceRepository
@@ -69,16 +71,36 @@ class FakeVoiceRepository(
     var failAssign: Boolean = false,
 ) : VoiceRepository {
     val assigned = mutableMapOf<String, String>()
-    val choicesAskedWith = mutableListOf<Pair<String, Set<String>>>()
+    val choicesAskedFor = mutableListOf<String>()
 
     override suspend fun voiceFor(character: String): Result<String> =
         if (character in fail) Result.failure(IllegalStateException("no voice"))
         else Result.success(assigned.getOrPut(character) { "voice-$character" })
 
-    override suspend fun choicesFor(character: String, taken: Set<String>): Result<List<VoiceChoice>> {
-        choicesAskedWith += character to taken
+    override suspend fun choicesFor(character: String): Result<List<VoiceChoice>> {
+        choicesAskedFor += character
         val current = voiceFor(character).getOrElse { return Result.failure(it) }
-        return Result.success(chooseTrio(pool, current, taken))
+        return Result.success(chooseTrio(choosePalette(pool), current, taken = emptySet()))
+    }
+
+    /**
+     * Spreads over the palette exactly as the real one does, so a test that asks how
+     * many voices a page uses gets the real answer rather than one voice per name.
+     */
+    override suspend fun voicesFor(characters: List<String>): Result<Map<String, String>> {
+        val keys = characters.distinct()
+        // One bad key fails the whole call, as the real one does: it resolves the
+        // page under a single lock, so a pool or database fault takes the page with
+        // it rather than leaving some lines voiceless.
+        keys.firstOrNull { it in fail }?.let {
+            return Result.failure(IllegalStateException("no voice"))
+        }
+        if (pool.isEmpty()) {
+            return Result.success(keys.associateWith { assigned.getOrPut(it) { "voice-$it" } })
+        }
+        val resolved = spreadOverPalette(keys, choosePalette(pool), assigned.toMap())
+        assigned.putAll(resolved)
+        return Result.success(resolved)
     }
 
     override suspend fun assign(character: String, voiceId: String): Result<Unit> =

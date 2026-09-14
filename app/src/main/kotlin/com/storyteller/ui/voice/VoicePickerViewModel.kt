@@ -69,14 +69,9 @@ class VoicePickerViewModel @Inject constructor(
     }
 
     private fun load() = viewModelScope.launch {
-        val taken = page
-            .map { it.voiceKey ?: NARRATOR }
-            .filter { it != voiceKey }
-            .distinct()
-            .mapNotNull { voices.voiceFor(it).getOrNull() }
-            .toSet()
-
-        val choices = voices.choicesFor(voiceKey, taken).getOrElse {
+        // No `taken` set: under the three-voice cap the offered voices are the three
+        // in play, and sharing is ordinary rather than a collision to dodge.
+        val choices = voices.choicesFor(voiceKey).getOrElse {
             _uiState.update { s -> s.copy(message = "Couldn't reach the voices just now.") }
             return@launch
         }

@@ -7,6 +7,8 @@ import com.storyteller.data.local.VoiceListEntity
 import com.storyteller.domain.model.VoiceChoice
 import com.storyteller.domain.model.VoiceProfile
 import com.storyteller.domain.model.chooseTrio
+import com.storyteller.domain.model.choosePalette
+import com.storyteller.domain.model.spreadOverPalette
 import com.storyteller.domain.repository.VoiceRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
@@ -89,16 +91,46 @@ class VoiceRepositoryImpl(
      * takes the lock without calling voiceFor. Nesting either inside the other
      * would deadlock the picker permanently.
      */
-    override suspend fun choicesFor(character: String, taken: Set<String>): Result<List<VoiceChoice>> = try {
+    override suspend fun choicesFor(character: String): Result<List<VoiceChoice>> = try {
         val current = voiceFor(character).getOrThrow()
-        val pool = try {
-            voicePool()
+        val palette = try {
+            choosePalette(voicePool())
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
             emptyList()
         }
-        Result.success(chooseTrio(pool, current, taken))
+        Result.success(chooseTrio(palette, current, taken = emptySet()))
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Throwable) {
+        Result.failure(e)
+    }
+
+    /**
+     * Resolves the whole page under one lock, so two characters new on the same page
+     * cannot race and land on the same voice through separate first-sight writes.
+     *
+     * Reads existing rows first and passes them to [spreadOverPalette], which leaves
+     * them alone: a remembered voice is never reassigned, including one outside the
+     * palette, which is a voice a person chose.
+     */
+    override suspend fun voicesFor(characters: List<String>): Result<Map<String, String>> = try {
+        val keys = characters.distinct()
+        lock.withLock {
+            val existing = keys.mapNotNull { k -> voiceDao.find(k)?.let { k to it.voiceId } }.toMap()
+            val resolved = if (existing.keys.containsAll(keys)) {
+                existing
+            } else {
+                val palette = choosePalette(voicePool())
+                require(palette.isNotEmpty()) { "ElevenLabs returned no voices" }
+                spreadOverPalette(keys, palette, existing).also { map ->
+                    map.filterKeys { it !in existing }
+                        .forEach { (k, v) -> voiceDao.upsert(CharacterVoiceEntity(k, v)) }
+                }
+            }
+            Result.success(resolved)
+        }
     } catch (e: CancellationException) {
         throw e
     } catch (e: Throwable) {

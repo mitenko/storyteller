@@ -176,4 +176,42 @@ class MigrationTest {
             }
         }
     }
+
+    /**
+     * Clearing is the point here, not a side effect - without it the three-voice
+     * cap never applies to a character already assigned. The `voice_list` cache is
+     * left alone: it is refetched anyway, and dropping it twice proves nothing.
+     */
+    @Test fun `the voice cap clears the random voices assigned before it`() {
+        context.deleteDatabase(name)
+        val callback = object : SupportSQLiteOpenHelper.Callback(7) {
+            override fun onCreate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `character_voice` " +
+                        "(`character` TEXT NOT NULL, `voiceId` TEXT NOT NULL, PRIMARY KEY(`character`))",
+                )
+            }
+            override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+        }
+        FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context).name(name).callback(callback).build(),
+        ).use { helper ->
+            val db = helper.writableDatabase
+            db.execSQL("INSERT INTO character_voice VALUES ('cogsley', 'v9')")
+            db.execSQL("INSERT INTO character_voice VALUES ('bill', 'v14')")
+
+            MIGRATION_7_8.migrate(db)
+
+            db.query("SELECT COUNT(*) FROM character_voice").use { c ->
+                c.moveToFirst()
+                assertEquals("every pre-cap voice was a random draw, and all of them go", 0, c.getInt(0))
+            }
+            // And the table is still usable, not dropped.
+            db.execSQL("INSERT INTO character_voice VALUES ('cogsley', 'palette-1')")
+            db.query("SELECT voiceId FROM character_voice").use { c ->
+                c.moveToFirst()
+                assertEquals("palette-1", c.getString(0))
+            }
+        }
+    }
 }

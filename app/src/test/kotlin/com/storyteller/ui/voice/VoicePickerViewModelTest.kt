@@ -91,14 +91,18 @@ class VoicePickerViewModelTest {
         assertEquals("and every offered voice speaks it", 3, audio.requestedPairs.size)
     }
 
-    @Test fun `the voices other characters speak in are excluded`() = runTest(dispatcher) {
+    /**
+     * Replaces `the voices other characters speak in are excluded`. Under the cap
+     * the picker no longer computes a taken set at all - the three offered voices
+     * are the three in play - so what is worth pinning is that it asks about THIS
+     * character and offers three.
+     */
+    @Test fun `the picker asks only about its own character`() = runTest(dispatcher) {
         val vm = viewModel()
         advanceUntilIdle()
 
-        val (character, taken) = voices.choicesAskedWith.single()
-        assertEquals("cogsley", character)
-        assertEquals(setOf("voice-bill", "voice-Narrator"), taken)
-        assertTrue(vm.uiState.value.cards.none { it.id == "voice-bill" })
+        assertEquals(listOf("cogsley"), voices.choicesAskedFor)
+        assertEquals(3, vm.uiState.value.cards.size)
     }
 
     @Test fun `opening the picker stops the page reading`() = runTest(dispatcher) {

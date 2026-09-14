@@ -1046,7 +1046,7 @@ and is worth more.
 
 ---
 
-## M14 — Three voices, and no more (needs M3)
+## M14 — Three voices, and no more — **done 2026-09-14** (device check unrun)
 
 A palette, not a picker change. The three voices in play on a page are chosen
 deliberately to contrast; every character maps onto one of them.
@@ -1056,13 +1056,13 @@ see feature #20 for why the two questions are different.
 
 | id | task | size | notes |
 |---|---|---|---|
-| M14.1 | Decide the allocation rule: which speakers get their own voice | S | Recommended in #20: by line count, narrator counted as an ordinary speaker. A decision, not code |
-| M14.2 | A pure `choosePalette(units, pool): Map<voiceKey, voiceId>` | M | Over units the pipeline already holds before `prepareAll`. No network, no DB, no screen — the same shape as `chooseTrio`, and testable the same way |
-| M14.3 | Route `prepare()`'s voice lookup through the palette | S | `voiceFor(unit.voiceKey ?: NARRATOR)` becomes a palette lookup with `voiceFor` as the fallback for a key the palette has no room for |
-| M14.4 | Drop `chooseTrio`'s `taken` exclusion | S | Under a cap, sharing is the normal case. The picker offers the three in play — removing a rule rather than adding one |
-| M14.5 | Test: a six-character page uses exactly three voices | S | The property the feature exists for |
-| M14.6 | Test: flipping a character between the three costs nothing after the first pass | S | The spend bound, measured on the same counting fake `ReadingPipelineVoiceChangeTest` uses |
-| M14.7 | Decide page-scope vs book-scope | S | Settle against M8. Recorded as open in #20 |
+| M14.1 | Decide the allocation rule | S | **done** — not by line count after all. The palette is GLOBAL (three voices for the app), and a newcomer takes the palette voice least used on its page. Line-counting was unnecessary once the palette stopped being per-page |
+| M14.2 | Pure `choosePalette` + `spreadOverPalette` | M | **done** — 11 tests. Split in two: choosing the three, and mapping speakers onto them | Over units the pipeline already holds before `prepareAll`. No network, no DB, no screen — the same shape as `chooseTrio`, and testable the same way |
+| M14.3 | Route the voice lookup through the palette | S | **done** — `VoiceRepository.voicesFor(keys)` resolves the whole page under one lock, before synthesis fans out | `voiceFor(unit.voiceKey ?: NARRATOR)` becomes a palette lookup with `voiceFor` as the fallback for a key the palette has no room for |
+| M14.4 | Drop `chooseTrio`'s `taken` exclusion | S | **done** — gone from the interface, the impl, the fake and the picker | Under a cap, sharing is the normal case. The picker offers the three in play — removing a rule rather than adding one |
+| M14.5 | Test: a six-character page uses exactly three voices | S | **done** — pure and at the repository | The property the feature exists for |
+| M14.6 | Test: flipping between the three is free after the first pass | S | **not done** — `ReadingPipelineVoiceChangeTest` proves the re-buy is per character; the flip-back-is-free case is still unwritten | The spend bound, measured on the same counting fake `ReadingPipelineVoiceChangeTest` uses |
+| M14.7 | Decide page-scope vs book-scope | S | **moot** — the palette is global, so every page uses the same three. M8 can scope the MAP per book without touching the palette |
 
 **Where it falls.** After M3, which it modifies, and it wants doing *before* a real
 spend cap — it removes most of the same hazard for a fraction of the work, and a cap
