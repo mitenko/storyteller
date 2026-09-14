@@ -178,11 +178,11 @@ class MigrationTest {
     }
 
     /**
-     * Clearing is the point here, not a side effect - without it the three-voice
-     * cap never applies to a character already assigned. The `voice_list` cache is
-     * left alone: it is refetched anyway, and dropping it twice proves nothing.
+     * The three-voice cap this was written for is gone, but the migration is not:
+     * it had already run on a device, so a database at version 8 must still have a
+     * way forward. The test stays to pin that it keeps working.
      */
-    @Test fun `the voice cap clears the random voices assigned before it`() {
+    @Test fun `clearing the voice map leaves the table usable`() {
         context.deleteDatabase(name)
         val callback = object : SupportSQLiteOpenHelper.Callback(7) {
             override fun onCreate(db: SupportSQLiteDatabase) {

@@ -44,7 +44,6 @@ best argument for running G.
 | **18** | **Show the first panel sooner (M12)** | M | probe | Streaming the parse, if the API allows it at all |
 | **19** | **Make the wait feel like something (M13)** | S | — | The child's own photograph during the read, not a grey spinner |
 | **14** | **Bold the word as it is read** | M | — | A pre-reader can follow the words, not just hear them |
-| **20** | **Cap the reading at three voices** | S | 9 (M3) | A child can tell the speakers apart, and voice-swapping stops costing money |
 | **21** | **A face for each voice** | M | 9 (M3) | A child who cannot read “Roger” can still pick a voice |
 
 Recommended order is at the bottom, with reasoning.
@@ -294,61 +293,28 @@ sitting.
 
 ---
 
-## 20. Cap the reading at three voices *(asked for)*
+## 20. Cap the reading at three voices — **WITHDRAWN 2026-09-14**
 
-A page uses **at most three distinct voices**, however many characters speak on it.
-A fourth character shares with one of the three rather than drawing a fourth voice.
+Built, then removed the same day. **I had misread the request**: "limit the reader to
+three voices" was taken as a cap on how many distinct voices the app uses, and it was
+not what was being asked for.
 
-**This reverses D6, deliberately.** D6 ruled the trio must be *per character*
-precisely because three-for-the-whole-book makes a six-character page collide
-two-to-one. That reasoning was about the picker, and it still holds for the picker.
-This is a different question: not *how many voices to offer* but *how many voices to
-use*, and three is a better answer than "as many as there are characters" for two
-reasons neither of which D6 weighed.
+Kept as a record because two things outlived it:
 
-**A four-year-old can follow three voices.** Six is not six characters to a small
-child, it is noise — and the account's pool makes it worse than the number suggests.
-Of the 21 voices, **13 are male, 7 female, 1 neutral** (measured 2026-09-14), so six
-random draws routinely produce three or four middle-aged American men who are
-genuinely hard to tell apart. Capping the palette lets the three be chosen to
-contrast, instead of hoping the draws do.
+- **`MIGRATION_7_8` stays in the schema.** It cleared `character_voice`, and it had
+  already run on a device before the feature was withdrawn — so a database at version
+  8 exists and must have a path forward. Deleting the migration would strand it. It
+  was harmless when it ran: every row it cleared was a random draw, since the picker
+  that lets a person choose a voice had not shipped. **It would not be harmless
+  now.**
+- **The lesson.** The feature was specified, built, tested and shipped to a device in
+  one sitting on a one-line request, without checking the reading back first. The
+  reading was plausible and wrong, and nothing in the process between the request and
+  the device was capable of noticing.
 
-**It bounds the spend hazard M3 opened.** M3 is the first feature that lets a child
-spend money by *tapping* rather than by photographing, and nothing caps that. With
-only three voices in play, a character has at most three targets — so once each
-voice has spoken a line, that line's clip is cached and **flipping between voices
-costs nothing at all**. The hazard is not removed, but it is bounded by a small
-constant instead of being unbounded. That is most of the value of a spend cap, for a
-fraction of the work, and it is worth doing whether or not a real cap follows.
-
-**It simplifies M3 rather than complicating it.** The picker currently excludes
-voices another character already speaks in (`chooseTrio`'s `taken` set). Under a cap
-the three offered voices *are* the three in play, sharing is the normal case rather
-than a collision to avoid, and the exclusion rule disappears. The picker gets
-simpler and more predictable at the same time: the same three, every character,
-every page.
-
-**The one real decision is who gets their own voice when there are more than three.**
-
-- **First three to speak.** Trivial, and wrong often enough to notice: a character
-  with one line in panel one takes a voice from the character who carries the page.
-- **By line count** — the three most talkative `voiceKey`s on the page get their own
-  voice, everyone else shares with the nearest. Feasible today: `toSpeechUnits`
-  produces every unit before `prepareAll` runs, so the counts are in hand before a
-  single clip is bought.
-- **Reserve one for the narrator.** Narration is usually the bulk of a prose page
-  and almost nothing on a comic page, so this is really a question the page-kind
-  work (#17 / M11) answers better than this feature can.
-
-Recommended: by line count, with the narrator counted as an ordinary speaker for
-now. It needs no new data, it is a pure function over units the pipeline already
-has, and it is cheap to revisit once M11 knows what kind of page it is looking at.
-
-**Open: page or book?** Three voices per *page* is what the pipeline can do today.
-Three per *book* is what a child would actually notice — a character must not change
-voice between page 4 and page 5. The voice map is already global and persistent, so
-in practice a character keeps its voice across pages anyway; what a cap per page
-cannot promise is that the *set* stays the same. This wants settling against M8.
+Voices are once again assigned at random per character, and #9 / M3's picker offers
+three per character with the voices other characters use excluded — which is the D6
+design, unchanged.
 
 ---
 
@@ -1046,27 +1012,13 @@ and is worth more.
 
 ---
 
-## M14 — Three voices, and no more — **done 2026-09-14** (device check unrun)
+## M14 — Three voices, and no more — **REVERTED 2026-09-14**
 
-A palette, not a picker change. The three voices in play on a page are chosen
-deliberately to contrast; every character maps onto one of them.
+Built and removed the same day; see #20. The code is gone — `choosePalette`,
+`spreadOverPalette`, `VoiceRepository.voicesFor` and the page-wide lookup in
+`ReadingPipelineImpl` — and `chooseTrio`'s `taken` exclusion is back.
 
-Reverses D6 for the *palette* while leaving D6's answer for the *picker* intact —
-see feature #20 for why the two questions are different.
-
-| id | task | size | notes |
-|---|---|---|---|
-| M14.1 | Decide the allocation rule | S | **done** — not by line count after all. The palette is GLOBAL (three voices for the app), and a newcomer takes the palette voice least used on its page. Line-counting was unnecessary once the palette stopped being per-page |
-| M14.2 | Pure `choosePalette` + `spreadOverPalette` | M | **done** — 11 tests. Split in two: choosing the three, and mapping speakers onto them | Over units the pipeline already holds before `prepareAll`. No network, no DB, no screen — the same shape as `chooseTrio`, and testable the same way |
-| M14.3 | Route the voice lookup through the palette | S | **done** — `VoiceRepository.voicesFor(keys)` resolves the whole page under one lock, before synthesis fans out | `voiceFor(unit.voiceKey ?: NARRATOR)` becomes a palette lookup with `voiceFor` as the fallback for a key the palette has no room for |
-| M14.4 | Drop `chooseTrio`'s `taken` exclusion | S | **done** — gone from the interface, the impl, the fake and the picker | Under a cap, sharing is the normal case. The picker offers the three in play — removing a rule rather than adding one |
-| M14.5 | Test: a six-character page uses exactly three voices | S | **done** — pure and at the repository | The property the feature exists for |
-| M14.6 | Test: flipping between the three is free after the first pass | S | **not done** — `ReadingPipelineVoiceChangeTest` proves the re-buy is per character; the flip-back-is-free case is still unwritten | The spend bound, measured on the same counting fake `ReadingPipelineVoiceChangeTest` uses |
-| M14.7 | Decide page-scope vs book-scope | S | **moot** — the palette is global, so every page uses the same three. M8 can scope the MAP per book without touching the palette |
-
-**Where it falls.** After M3, which it modifies, and it wants doing *before* a real
-spend cap — it removes most of the same hazard for a fraction of the work, and a cap
-designed after it can be a smaller cap.
+`MIGRATION_7_8` is deliberately NOT removed. It had already run on a device.
 
 ---
 

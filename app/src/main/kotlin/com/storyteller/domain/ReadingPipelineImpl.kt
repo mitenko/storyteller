@@ -188,17 +188,7 @@ class ReadingPipelineImpl(
         val gate = Semaphore(MAX_IN_FLIGHT_SYNTHESES)
         // Launch every unit concurrently, then await in index order. Concurrency
         // without losing reading order.
-        // ONE lookup for the whole page, before any synthesis fans out. The cap is
-        // a property of the page - which voice a newcomer gets depends on what the
-        // rest of the cast already uses - so resolving unit by unit could not
-        // spread collisions even if it wanted to.
-        val voiceMap = voices.voicesFor(units.map { it.voiceKey ?: NARRATOR })
-            .getOrElse { e ->
-                setState(myEpoch, PipelineState.Failed(e.toReason(FailureReason.Synthesis), retryable = true))
-                return@coroutineScope
-            }
-
-        val jobs = units.map { unit -> async { gate.withPermit { prepare(unit, voiceMap) } } }
+        val jobs = units.map { unit -> async { gate.withPermit { prepare(unit) } } }
 
         val ready = mutableListOf<PreparedUnit>()
         for (deferred in jobs) {
@@ -252,21 +242,14 @@ class ReadingPipelineImpl(
      * Never throws for a repository fault: a throw out of the child `async` is
      * rethrown by `await()`, bypassing the `getOrElse` failure path entirely.
      */
-    private suspend fun prepare(
-        unit: SpeechUnit,
-        voiceMap: Map<String, String>,
-    ): Result<PreparedUnit> = try {
+    private suspend fun prepare(unit: SpeechUnit): Result<PreparedUnit> = try {
         // The reconciled key, NOT unit.speaker. The display string drifts between
         // reads - "the pink rabbit with a bandaged ear" one time, "the pink
         // rabbit-like creature" the next - and keying a voice on it gave one
         // character several voices. Narration has no character and falls back to
         // the narrator's own row, which is what it has always used.
-        // From the page's map, resolved once above. voiceFor is the fallback for a
-        // key the map somehow lacks - it cannot happen today, and silently reading
-        // a line in no voice would be worse than one extra lookup.
-        val key = unit.voiceKey ?: NARRATOR
-        val voiceId = voiceMap[key]
-            ?: voices.voiceFor(key).getOrElse { return Result.failure(it) }
+        val voiceId = voices.voiceFor(unit.voiceKey ?: NARRATOR)
+            .getOrElse { return Result.failure(it) }
         // What the voice is given, which is not always what the page shows: a
         // comic's capitals make "MM?" read as "em-em" rather than a hum. Computed
         // ONCE and used for both calls - the audio cache is keyed on this text, so

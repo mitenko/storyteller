@@ -24,27 +24,11 @@ interface VoiceRepository {
     suspend fun voiceFor(character: String): Result<String>
 
     /**
-     * Every speaker on a page at once, assigning any that have none.
-     *
-     * A page, not a character, because the cap is a property of the page: which
-     * voice a newcomer gets depends on what the others on that page already use.
-     * Resolving one at a time cannot spread collisions, because each call would be
-     * blind to the rest of the cast.
-     *
-     * [characters] is in reading order. The returned map covers every key given.
+     * The voices offered for [character]: the one it already speaks in, then up to
+     * two contrasting alternatives, excluding every id in [taken] - the voices the
+     * other characters on the page in hand already use.
      */
-    suspend fun voicesFor(characters: List<String>): Result<Map<String, String>>
-
-    /**
-     * The voices offered for [character]: the one it already speaks in, then the
-     * rest of the palette.
-     *
-     * No `taken` parameter any more. Under the three-voice cap the offered voices
-     * ARE the three in play, sharing is the ordinary case rather than a collision
-     * to avoid, and excluding what another character uses would leave a page with
-     * four speakers offering nothing.
-     */
-    suspend fun choicesFor(character: String): Result<List<VoiceChoice>>
+    suspend fun choicesFor(character: String, taken: Set<String>): Result<List<VoiceChoice>>
 
     /**
      * Replaces the stored voice for [character].

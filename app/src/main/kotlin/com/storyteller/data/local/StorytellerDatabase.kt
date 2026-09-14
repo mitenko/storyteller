@@ -129,24 +129,21 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
 }
 
 /**
- * Clears every remembered voice, so the three-voice cap actually applies.
+ * Clears every remembered voice.
  *
- * Every row in this table is a RANDOM draw from the 21-voice pool - `voiceFor`
- * picked one on first sight and never revisited, and the picker that lets a person
- * choose one has not shipped. So no row here was ever chosen by anybody, and
- * clearing destroys nothing a human decided.
+ * KEPT, though the feature it was written for is gone. It was added for a
+ * three-voice cap that was removed the same day, and it had already run on a real
+ * device by then - so a database out there is at version 8 and must have a path
+ * forward. Deleting this migration would strand it.
  *
- * Without this the feature would not work where it matters. A page whose cast was
- * already assigned keeps its old spread of voices for ever, because
- * spreadOverPalette deliberately never reassigns a remembered voice - and the
- * device this app runs on has exactly such pages.
- *
- * This is the LAST time clearing is free. Once the picker ships, a row may be a
- * choice a child made, and the same statement would then be destructive. Any later
- * change to the palette must remap or migrate rather than clear.
- *
+ * It was harmless when it ran and remains so. Every row it cleared was a RANDOM
+ * draw: `voiceFor` picked one on first sight and never revisited, and the picker
+ * that lets a person choose had not shipped, so no row was ever chosen by anybody.
  * The cost is one re-assignment per character on the next read, which is what
  * happens on any first read anyway.
+ *
+ * It would NOT be harmless now. Once the picker ships a row may be a choice a child
+ * made, and any later migration must remap rather than clear.
  */
 val MIGRATION_7_8 = object : Migration(7, 8) {
     override fun migrate(db: SupportSQLiteDatabase) {
