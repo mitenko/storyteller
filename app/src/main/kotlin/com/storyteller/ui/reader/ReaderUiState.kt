@@ -1,5 +1,6 @@
 package com.storyteller.ui.reader
 
+import com.storyteller.domain.model.NARRATOR
 import com.storyteller.domain.model.BoundingBox
 import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.PlaybackState
@@ -127,6 +128,20 @@ sealed interface ReaderUiState {
          * positional construction across the screen tests keeps compiling.
          */
         val timings: List<WordTiming> = emptyList(),
+        /**
+         * The key this line's voice is remembered under - what the badge opens the
+         * picker on.
+         *
+         * NOT [speaker]: that string drifts between reads of one page, which is the
+         * whole reason the voice map stopped being keyed on it. Non-null and
+         * defaulted to [NARRATOR] because ReadingPipelineImpl.prepare already
+         * resolves `voiceKey ?: NARRATOR`, so narration is a keyed character with a
+         * real row rather than an absence.
+         *
+         * Last and defaulted so the positional construction across the screen tests
+         * keeps compiling.
+         */
+        val voiceKey: String = NARRATOR,
     )
 
     /**

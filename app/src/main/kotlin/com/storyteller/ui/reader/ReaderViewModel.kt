@@ -3,6 +3,7 @@ package com.storyteller.ui.reader
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.storyteller.domain.ReadingPipeline
+import com.storyteller.domain.model.NARRATOR
 import com.storyteller.domain.model.FailureReason
 import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.PipelineState
@@ -326,6 +327,7 @@ class ReaderViewModel @Inject constructor(
                     // which lost Auto's only progress indication (F7).
                     audioReady = u.index in readyIndices,
                     timings = ready.firstOrNull { it.unit.index == u.index }?.timings.orEmpty(),
+                    voiceKey = u.voiceKey ?: NARRATOR,
                 )
             }.groupByPanel(),
             current = current,

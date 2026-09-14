@@ -30,7 +30,8 @@ fun StorytellerNavHost() {
         composable(Routes.READER) {
             // popBackStack, not navigate: returning to capture must not stack a
             // second capture screen behind the reader.
-            ReaderScreen(onBack = { nav.popBackStack() })
+            // onOpenVoices lands in the next commit, with the picker it opens.
+            ReaderScreen(onBack = { nav.popBackStack() }, onOpenVoices = {})
         }
         composable(Routes.SETTINGS) {
             SettingsScreen(onBack = { nav.popBackStack() })

@@ -1,5 +1,6 @@
 package com.storyteller.ui.reader
 
+import androidx.compose.material3.Surface
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material3.FabPosition
@@ -67,6 +68,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun ReaderScreen(
     onBack: () -> Unit,
+    onOpenVoices: (String) -> Unit,
     viewModel: ReaderViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -84,6 +86,7 @@ fun ReaderScreen(
         onRetry = viewModel::onRetry,
         onBack = onBack,
         onLineTapped = viewModel::onLineTapped,
+        onOpenVoices = onOpenVoices,
         spokenWord = spokenWord,
     )
 }
@@ -102,6 +105,7 @@ fun ReaderContent(
     onRetry: () -> Unit,
     onBack: () -> Unit,
     onLineTapped: (Int) -> Unit = {},
+    onOpenVoices: (String) -> Unit = {},
     spokenWord: SpokenWord? = null,
     listState: LazyListState = rememberLazyListState(),
 ) {
@@ -185,6 +189,7 @@ fun ReaderContent(
                                     scrollSuspended = false
                                     onLineTapped(it)
                                 },
+                                onBadgeTap = onOpenVoices,
                             )
                             // A visible break between panels. Whitespace alone left
                             // two stacked pictures reading as one tall picture,
@@ -283,6 +288,14 @@ private val FOCUS_RING_CORNER = 12.dp
  */
 internal fun contentAlphaFor(audioReady: Boolean): Float = if (audioReady) 1f else NOT_READY_ALPHA
 
+private val BADGE_CORNER = 12.dp
+
+/**
+ * Material's own minimum. A four-year-old's aim is worse than an adult's, and this
+ * is the only control on the reading screen that is not the whole line.
+ */
+private val BADGE_MIN_TOUCH = 48.dp
+
 /** How much of the list a single panel picture may occupy. */
 internal const val PANEL_MAX_HEIGHT_FRACTION = 0.5f
 
@@ -329,6 +342,7 @@ internal fun PanelCard(
     image: PageImage?,
     playingIndex: Int?,
     onLineTapped: (Int) -> Unit,
+    onBadgeTap: (String) -> Unit,
     modifier: Modifier = Modifier,
     focusLine: Int? = null,
     lastPlayed: Int? = null,
@@ -394,6 +408,7 @@ internal fun PanelCard(
         }
         group.lines.forEach { line ->
             LineRow(
+                onBadgeTap = onBadgeTap,
                 line = line,
                 sounding = playingIndex == line.index,
                 isFocused = focusLine == line.index,
@@ -412,6 +427,7 @@ internal fun LineRow(
     line: ReaderUiState.Line,
     sounding: Boolean,
     onTap: () -> Unit,
+    onBadgeTap: (String) -> Unit,
     modifier: Modifier = Modifier,
     isFocused: Boolean = false,
     spokenWordIndex: Int? = null,
@@ -445,7 +461,25 @@ internal fun LineRow(
             .padding(vertical = 4.dp, horizontal = if (isFocused) 8.dp else 0.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(line.speaker, style = MaterialTheme.typography.labelLarge)
+            // A control, not a caption: minimum touch target, visible affordance,
+            // and reachable while the line's own audio is still being synthesised.
+            // It reports the KEY, never the displayed label - the label drifts
+            // between reads of one page and is not what the voice map is keyed on.
+            Surface(
+                onClick = { onBadgeTap(line.voiceKey) },
+                shape = RoundedCornerShape(BADGE_CORNER),
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier
+                    .heightIn(min = BADGE_MIN_TOUCH)
+                    .semantics { contentDescription = "Change ${line.speaker}'s voice" },
+            ) {
+                Text(
+                    line.speaker,
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                )
+            }
             if (sounding) {
                 Text(
                     "♪",
