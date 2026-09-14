@@ -45,6 +45,7 @@ best argument for running G.
 | **19** | **Make the wait feel like something (M13)** | S | — | The child's own photograph during the read, not a grey spinner |
 | **14** | **Bold the word as it is read** | M | — | A pre-reader can follow the words, not just hear them |
 | **20** | **Cap the reading at three voices** | S | 9 (M3) | A child can tell the speakers apart, and voice-swapping stops costing money |
+| **21** | **A face for each voice** | M | 9 (M3) | A child who cannot read “Roger” can still pick a voice |
 
 Recommended order is at the bottom, with reasoning.
 
@@ -348,6 +349,67 @@ Three per *book* is what a child would actually notice — a character must not 
 voice between page 4 and page 5. The voice map is already global and persistent, so
 in practice a character keeps its voice across pages anyway; what a cap per page
 cannot promise is that the *set* stays the same. This wants settling against M8.
+
+---
+
+## 21. A face for each voice *(asked for)*
+
+Each of the account's voices gets an illustrated face. The picker shows faces, not
+names.
+
+**The problem it solves is that the picker is currently unusable by its own user.**
+M3's cards read "Roger", "Jessica", "Bill". A four-year-old — the entire audience
+for this app — cannot read them. They can press a card and hear a sample, so the
+screen is *operable*, but the labels do no work at all: the child is choosing between
+three identical grey rectangles by trial and error, and has nothing to recognise the
+next time they open it. A face is the thing that makes the second visit different
+from the first.
+
+**This is not the old character badge returning.** `PROJECT.md` § records a
+"character badge" — a small cropped portrait per character, with a
+`character_voice.badgePath` column added and then dropped by a migration — and
+M3's spec explicitly ruled that out of scope. It stays out. That was a crop of
+*this page*, showing what the character looks like in the book. This is a fixed
+illustration of a **voice**, the same 21 pictures for every book, and it never
+claims to be the character.
+
+That distinction is the whole design and it is easy to lose. A face beside a line
+that a child reads as "this is what the rabbit looks like" would be actively wrong,
+since the rabbit is drawn on the page in front of them. The faces belong on the
+**picker**, where the subject genuinely is the voice. Whether one also belongs on the
+badge in the reader is a separate question and the answer is probably no.
+
+**Generated once, shipped as assets.** 21 images, made offline with an image model
+and committed as drawables. Not generated on the device, not fetched at runtime: they
+never change, they must work offline, and a child must never wait for one. The
+generation cost is one-time and small; the runtime cost is zero.
+
+**It composes well with #20.** Under a three-voice cap, only three faces are ever in
+play on a page, and a child learns three faces quickly — which is a far better
+answer to "who is speaking" than three names they cannot read. The two features are
+worth more together than apart.
+
+**The real design question is what a face may imply.** Each voice carries a `gender`
+and an `age` label, and drawing a face from those means drawing a person. Three
+things follow:
+
+- **Illustrated, never photoreal.** A photoreal face is a claim about a specific
+  person; a drawing is a character. This also sidesteps generating likenesses
+  entirely.
+- **Gender and age can be shown; nothing else should be invented.** The labels carry
+  `accent` too — american, british, australian. Drawing an accent means drawing
+  an ethnicity, which the label does not say and the image model would guess. It
+  should not be in the prompt.
+- **The abstract alternative is worth one prototype.** Coloured shapes, or animals,
+  carry none of this and a small child may recognise a blue triangle as readily as a
+  face. The argument for faces is that "who is talking" is a question about people.
+  The argument against is that everything in the previous paragraph disappears. One
+  round of each, looked at, would settle it better than more reasoning.
+
+**Open: what happens to a voice the account adds later?** The set is fixed at 21
+today. A voice with no face needs a fallback — its initial in a coloured circle
+is enough, and is also the placeholder that makes the feature shippable before all
+21 images exist.
 
 ---
 
@@ -1005,4 +1067,28 @@ see feature #20 for why the two questions are different.
 **Where it falls.** After M3, which it modifies, and it wants doing *before* a real
 spend cap — it removes most of the same hazard for a fraction of the work, and a cap
 designed after it can be a smaller cap.
+
+---
+
+## M15 — A face for each voice (needs M3)
+
+Twenty-one illustrations, generated once, shown on the picker. Almost no runtime
+code: the work is in the asset pipeline and in one design decision.
+
+| id | task | size | notes |
+|---|---|---|---|
+| M15.1 | Prototype: one round of faces, one round of abstract avatars, looked at side by side | S | Settles the question #21 raises rather than arguing it. Three voices is enough to judge |
+| M15.2 | Write the generation prompt from the labels | S | `gender` and `age` only. **Not** `accent` — it does not say ethnicity and the model would invent one |
+| M15.3 | Generate all 21 and commit them as drawables | S | Offline, one-time. Never generated on device, never fetched at runtime |
+| M15.4 | Map voice id → drawable, with an initial-in-a-circle fallback | S | The fallback is what lets this ship before every image exists, and covers a voice the account adds later |
+| M15.5 | Show the face on the picker card | S | The card already has `name` and `isCurrent`; this is a leading image |
+| M15.6 | Test: every voice in the pool resolves to a face or a fallback, never to nothing | S | The property worth pinning — a missing image must degrade, not blank the card |
+
+**Where it falls.** After M3, which it makes usable by its actual audience, and
+ideally alongside #20 / M14 — three faces a child can learn beats three names they
+cannot read, and the two changes touch the same screen.
+
+**Explicitly not in scope:** a face on the reader's badge. The badge sits beside a
+line on a page where the character is already drawn; a second, different face there
+would contradict the book.
 
