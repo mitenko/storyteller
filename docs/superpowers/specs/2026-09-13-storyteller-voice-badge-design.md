@@ -119,9 +119,18 @@ one marked → audition clips synthesised once and cached.
 `taken` is the set of voices resolved for the *other* `voiceKey`s on the page in
 hand — the reader already holds them, so the screen is told, not left to ask.
 
-**While the page is reading:** opening the picker leaves playback alone. The reader
-keeps its position; a child comes back to the line they left. Nothing is torn down
-to make room for an audition.
+**While the page is reading:** opening the picker **stops** playback. The app has
+one `PagePlayer`; an audition has to come out of it, and a page reading underneath
+an audition is two voices at once. The reader keeps its position — its ViewModel
+survives on the back stack — so a child comes back to the line they left.
+
+*Corrected during planning.* An earlier draft said the picker left playback alone.
+That is not implementable against a single player, and would have sounded worse
+than it read.
+
+**The narrator is a character here.** `prepare()` already resolves
+`unit.voiceKey ?: NARRATOR`, so narration is keyed and assignable like anyone else.
+Its badge works; it is not a dead label.
 
 **Choosing:** `assign(key, voiceId)` → `VoiceDao.upsert` → back to the reader → the
 lines that character speaks re-prepare.
@@ -149,7 +158,7 @@ every other clip is already cached and stays.
 - **Screen**, Robolectric: the badge names its own line's speaker, not the page's
   first; tapping reports the `voiceKey`; three cards render with the current marked.
 - **Integration**: after `assign`, only the changed character's lines are re-requested.
-- **Integration**: opening the picker mid-page does not stop playback or reset position.
+- **Integration**: opening the picker mid-page stops playback and keeps position.
 
 ## Out of scope
 
@@ -173,3 +182,95 @@ are fixed.
 **A page of pure narration is one badge repeated down the screen**, and a crowded
 comic page has six different ones. Both want looking at on a device before the
 styling is settled.
+
+## Review findings
+
+### High: the current voice can conflict with the `taken` rule
+
+The rules say both that the current voice is always included and that a voice
+already assigned to another character on the page is never offered. Those
+conditions can be mutually exclusive, especially after a page is re-read or
+after assignments are made on another page. The spec needs a precedence rule
+and an explicit behavior for a collision. The safest behavior is to preserve
+the current assignment as a fourth, locked choice (clearly marked as a
+collision), exclude it from alternatives, and prevent assigning the same voice
+to two characters through this screen. Otherwise `choicesFor` cannot satisfy
+its own contract.
+
+### High: auditioning is not guaranteed to be free for the current voice
+
+The shortest line may not have been synthesized: Tap mode can leave it
+unplayed, and a page may be only partially prepared when the badge is opened.
+The statement that the first card costs nothing is therefore only true on a
+cache hit. The opening flow needs an explicit cache lookup and loading state
+for all three cards, including the current voice, plus cancellation behavior
+when the screen is left. It should also say whether an audition failure is
+allowed to trigger a paid synthesis or only reports a cache/network failure.
+
+### High: reassignment has no defined page/audio consistency model
+
+`assign` changes a global character-to-voice row, while already prepared
+`PreparedUnit`s, the active player queue, and stored pages still contain the
+old voice/audio. “The lines ... re-prepare” does not define whether playback is
+paused, whether the current line restarts, how stale queued items are removed,
+or how a stored page is updated. Define an assignment event/version and an
+atomic reader refresh policy: stop or replace only the affected queued items,
+preserve the current position where possible, and ensure the next stored-page
+open resolves intentionally rather than silently mixing old and new audio.
+
+### High: global assignments conflict with the stated per-page experience
+
+The map is global until M8, so assigning a voice for one page changes every
+existing and future book that uses the same `voiceKey`. The out-of-scope note
+only says that per-book voices are deferred; it does not describe this
+user-visible consequence. The picker must state that the choice applies
+everywhere, and the design should specify whether existing stored pages are
+re-rendered with the new voice or retain the voice captured when they were
+read. Without this, reopening a stored page can produce audio different from
+the page previously saved.
+
+### Medium: the voice metadata and cache contract is incomplete
+
+Adding names and selection labels requires more than `voiceIdsCsv`: the API
+metadata shape, serialization format, freshness/expiry policy, migration
+behavior, and handling of removed or renamed voices are unspecified. The
+offline fallback cannot reliably show the current voice’s name when the
+database currently stores only its id. Define a versioned cached voice record
+(id, name, gender, age, accent, descriptive labels, and category), how old
+rows are read, and what happens when the current id is absent from a refreshed
+pool.
+
+### Medium: “contrast” is not an executable selection algorithm
+
+“Gender and age before timbre” does not define how to rank candidates, what to
+do when metadata is missing, or how ties are broken. As written, the pure
+selection test cannot be deterministic and two implementations can produce
+different trios. Specify a stable ordering and tie-breaker (for example,
+category preference, gender distance, age distance, timbre distance, then
+voice id), and define whether missing metadata is a mismatch or merely
+unknown.
+
+### Medium: the source of `taken` can become stale
+
+Passing `taken` from the reader is correct only for the snapshot represented by
+the current page. Another picker, a delayed assignment, or a page refresh can
+change the global map before confirmation. `assign` must re-check uniqueness
+against the current assignments (and return a conflict result), rather than
+trusting the screen’s old `taken` set. The repository contract should make this
+atomic with the write.
+
+### Medium: the audition line needs a stable tie and empty-text rule
+
+The shortest-line rule needs deterministic handling for equal-length lines,
+whitespace-only text, and lines whose `voiceKey` is null or cannot be resolved.
+“Shortest” should be defined as spoken characters or tokens, with source order
+as the tie-breaker, and the picker should have an explicit unavailable state
+when no usable text exists. This also belongs in the pure-function contract.
+
+### Low: accessibility and interaction states are under-specified
+
+The badge is being changed from a passive `Text` to a control, but the design
+does not require an accessible label, minimum touch target, selected state,
+disabled/loading state, or a non-audio indication for an audition failure.
+Those states matter particularly for a child using TalkBack or a device where
+audio is unavailable; include them in the screen acceptance criteria.
