@@ -12,8 +12,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CachedAudioEntity::class,
         VoiceListEntity::class,
         SettingEntity::class,
+        StoredPageEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = false,
 )
 abstract class StorytellerDatabase : RoomDatabase() {
@@ -22,6 +23,7 @@ abstract class StorytellerDatabase : RoomDatabase() {
     abstract fun cachedAudioDao(): CachedAudioDao
     abstract fun voiceListDao(): VoiceListDao
     abstract fun settingsDao(): SettingsDao
+    abstract fun storedPageDao(): StoredPageDao
 }
 
 val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -81,5 +83,19 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
 val MIGRATION_4_5 = object : Migration(4, 5) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("DELETE FROM character_voice")
+    }
+}
+
+/**
+ * Adds `stored_page`. Purely additive: no existing row is touched, so a child's
+ * cached parses, audio and voices all survive.
+ */
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `stored_page` " +
+                "(`id` TEXT NOT NULL, `photoPath` TEXT NOT NULL, `unitsJson` TEXT NOT NULL, " +
+                "`parseVersion` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        )
     }
 }

@@ -56,3 +56,26 @@ interface SettingsDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun put(entity: SettingEntity)
 }
+
+@Dao
+interface StoredPageDao {
+    /** Newest first: a library is read from the most recent page backwards. */
+    @Query("SELECT * FROM stored_page ORDER BY createdAt DESC")
+    fun observeAll(): Flow<List<StoredPageEntity>>
+
+    @Query("SELECT * FROM stored_page WHERE id = :id")
+    suspend fun find(id: String): StoredPageEntity?
+
+    @Query("SELECT COUNT(*) FROM stored_page")
+    suspend fun count(): Int
+
+    /**
+     * REPLACE, so re-reading a page it already holds refreshes the row instead of
+     * failing. The id is the image hash, so that is the same page by definition.
+     */
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(entity: StoredPageEntity)
+
+    @Query("DELETE FROM stored_page WHERE id = :id")
+    suspend fun delete(id: String)
+}

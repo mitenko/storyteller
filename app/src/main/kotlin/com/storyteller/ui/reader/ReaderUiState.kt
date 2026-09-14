@@ -4,6 +4,7 @@ import com.storyteller.domain.model.BoundingBox
 import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.PlaybackState
 import com.storyteller.domain.model.ReadingMode
+import com.storyteller.domain.model.WordTiming
 
 sealed interface ReaderUiState {
     data object ReadingPage : ReaderUiState
@@ -120,6 +121,12 @@ sealed interface ReaderUiState {
          * in the screen tests keeps compiling.
          */
         val panel: BoundingBox? = null,
+        /**
+         * When each word of [text] is spoken, or empty when the clip has no stored
+         * alignment. Last and optional for the same reason [panel] is: the
+         * positional construction across the screen tests keeps compiling.
+         */
+        val timings: List<WordTiming> = emptyList(),
     )
 
     /**

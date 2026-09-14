@@ -2,7 +2,10 @@ package com.storyteller.data.audio
 
 import com.storyteller.data.local.CachedAudioDao
 import com.storyteller.data.local.CachedAudioEntity
+import android.util.Base64
 import com.storyteller.data.sha256
+import com.storyteller.domain.model.WordTiming
+import com.storyteller.domain.model.wordTimingsFrom
 import com.storyteller.domain.repository.AudioRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
@@ -110,15 +113,62 @@ class AudioRepositoryImpl(
         val target = File(audioDir, "$key.mp3")
         val partial = File(audioDir, "$key.mp3.part")
 
-        api.synthesize(voiceId, TtsRequest(text = text)).use { body ->
-            partial.outputStream().use { out -> body.byteStream().copyTo(out) }
-        }
+        // The timestamped endpoint returns the clip base64-encoded inside JSON
+        // rather than as a stream, so the bytes pass through memory on the way to
+        // disk. A page line is tens of kilobytes; this is not the streaming path
+        // and does not need to be.
+        val spoken = api.synthesizeWithTimestamps(voiceId, TtsRequest(text = text))
+        partial.outputStream().use { out -> out.write(Base64.decode(spoken.audio_base64, Base64.DEFAULT)) }
         // Write to a temp name then rename, so a cancelled or failed download can
         // never be mistaken for a valid cache entry.
         check(partial.renameTo(target)) { "could not finalize audio for $key" }
 
+        writeTimings(key, spoken.alignment)
         dao.upsert(CachedAudioEntity(key, target.absolutePath, System.currentTimeMillis()))
         return target
+    }
+
+    /**
+     * Word timings live in a sidecar beside the clip, not in a column.
+     *
+     * They belong to the file, so the file's own name pairs them without a
+     * migration, and the eventual cleanup in the storage milestone deletes one
+     * path prefix rather than reconciling a row against a disk. The cost is that
+     * whoever deletes a clip must delete this too - noted where that lands.
+     *
+     * Written AFTER the clip is renamed into place, so a sidecar can never
+     * describe audio that does not exist. The reverse - a clip with no sidecar -
+     * is the ordinary case for everything synthesised before this existed, and is
+     * exactly what the estimator covers.
+     */
+    private fun writeTimings(key: String, alignment: Alignment?) {
+        val words = alignment?.let {
+            wordTimingsFrom(it.characters, it.character_start_times_seconds, it.character_end_times_seconds)
+        }.orEmpty()
+        if (words.isEmpty()) return
+        val payload = words.joinToString(",", prefix = "[", postfix = "]") {
+            """{"s":${it.startMs},"e":${it.endMs}}"""
+        }
+        runCatching { File(audioDir, "$key.json").writeText(payload) }
+    }
+
+    /**
+     * The stored word timings for a line, or null when there are none.
+     *
+     * Null is the ordinary answer for any clip cached before timings existed, and
+     * the caller is expected to fall back to the estimator rather than treat it as
+     * an error. A malformed sidecar reads as null for the same reason: highlighting
+     * approximately beats failing a page that plays perfectly well.
+     */
+    override suspend fun timingsFor(text: String, voiceId: String): List<WordTiming>? {
+        val file = File(audioDir, "${sha256("$voiceId|$text")}.json")
+        if (!file.exists()) return null
+        return runCatching {
+            Regex("""\{"s":(\d+),"e":(\d+)\}""").findAll(file.readText())
+                .map { WordTiming(it.groupValues[1].toInt(), it.groupValues[2].toInt()) }
+                .toList()
+                .takeIf { it.isNotEmpty() }
+        }.getOrNull()
     }
 
     // A leftover .part file is harmless by design (nothing can mistake it for a

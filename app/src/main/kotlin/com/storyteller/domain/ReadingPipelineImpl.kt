@@ -2,6 +2,7 @@ package com.storyteller.domain
 
 import com.storyteller.domain.model.FailureReason
 import com.storyteller.domain.model.NARRATOR
+import com.storyteller.domain.model.spokenForm
 import com.storyteller.domain.model.PageImage
 import com.storyteller.domain.model.PipelineState
 import com.storyteller.domain.model.PreparedUnit
@@ -187,8 +188,17 @@ class ReadingPipelineImpl(
         // the narrator's own row, which is what it has always used.
         val voiceId = voices.voiceFor(unit.voiceKey ?: NARRATOR)
             .getOrElse { return Result.failure(it) }
-        val file = audio.audioFor(unit.text, voiceId).getOrElse { return Result.failure(it) }
-        Result.success(PreparedUnit(unit, voiceId, file))
+        // What the voice is given, which is not always what the page shows: a
+        // comic's capitals make "MM?" read as "em-em" rather than a hum. Computed
+        // ONCE and used for both calls - the audio cache is keyed on this text, so
+        // synthesising one string and looking timings up under another would miss
+        // every time and re-buy the clip on every read.
+        val spoken = spokenForm(unit.text)
+        val file = audio.audioFor(spoken, voiceId).getOrElse { return Result.failure(it) }
+        // Timings are a nicety: a line reads perfectly well without them, so a
+        // missing or unreadable sidecar must never fail the unit that owns it.
+        val timings = audio.timingsFor(spoken, voiceId).orEmpty()
+        Result.success(PreparedUnit(unit, voiceId, file, timings))
     } catch (e: CancellationException) {
         // See `guarded`: still-active means a spurious cancellation from the
         // repository, which has to become a reportable failure.

@@ -50,6 +50,10 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -66,6 +70,9 @@ fun ReaderScreen(
     viewModel: ReaderViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    // Collected with lifecycle, which is what stops the sampler behind it while
+    // the reader is off screen: positionMs only runs while something subscribes.
+    val spokenWord by viewModel.spokenWord.collectAsStateWithLifecycle()
 
     // No DisposableEffect stopping playback here: the composition is disposed on
     // every configuration change, so that would silence the story on rotation
@@ -77,6 +84,7 @@ fun ReaderScreen(
         onRetry = viewModel::onRetry,
         onBack = onBack,
         onLineTapped = viewModel::onLineTapped,
+        spokenWord = spokenWord,
     )
 }
 
@@ -94,6 +102,7 @@ fun ReaderContent(
     onRetry: () -> Unit,
     onBack: () -> Unit,
     onLineTapped: (Int) -> Unit = {},
+    spokenWord: SpokenWord? = null,
     listState: LazyListState = rememberLazyListState(),
 ) {
     ReaderFrame(
@@ -171,6 +180,7 @@ fun ReaderContent(
                                 playingIndex = state.playingIndex,
                                 focusLine = state.focusLine,
                                 lastPlayed = state.lastPlayedLine,
+                                spokenWord = spokenWord,
                                 onLineTapped = {
                                     scrollSuspended = false
                                     onLineTapped(it)
@@ -322,6 +332,7 @@ internal fun PanelCard(
     modifier: Modifier = Modifier,
     focusLine: Int? = null,
     lastPlayed: Int? = null,
+    spokenWord: SpokenWord? = null,
 ) {
     val first = group.lines.first()
     // Which line THIS tap on the picture reads. Successive taps walk the panel's
@@ -386,6 +397,9 @@ internal fun PanelCard(
                 line = line,
                 sounding = playingIndex == line.index,
                 isFocused = focusLine == line.index,
+                // Only the sounding line has a word to accent; every other row is
+                // told null and renders exactly as it did before this existed.
+                spokenWordIndex = spokenWord?.takeIf { it.lineIndex == line.index }?.wordIndex,
                 onTap = { onLineTapped(line.index) },
             )
         }
@@ -400,6 +414,7 @@ internal fun LineRow(
     onTap: () -> Unit,
     modifier: Modifier = Modifier,
     isFocused: Boolean = false,
+    spokenWordIndex: Int? = null,
 ) {
     Column(
         modifier
@@ -441,18 +456,49 @@ internal fun LineRow(
                 )
             }
         }
-        LineText(line.text)
+        LineText(line.text, spokenWordIndex = spokenWordIndex)
     }
 }
 
 /**
- * A line's words.
+ * A line's words, with the one being spoken accented.
  *
- * Its own composable for one reason: a planned feature bolds the word currently
- * being spoken, and that change belongs in one small function rather than inside
- * the card's layout. No parameter for it is added until it is built.
+ * Its own composable since before there was anything to accent, reserved for
+ * exactly this. [spokenWordIndex] is null whenever nothing is sounding on this
+ * line, or the clip has no timings to place a word with, and then this renders
+ * precisely what it always did.
+ *
+ * Bold rather than a coloured background: the line already carries a focus ring
+ * and a sounding marker, and a third colour competing with those reads as clutter
+ * at arm's length. Weight is legible on top of both.
  */
 @Composable
-internal fun LineText(text: String, modifier: Modifier = Modifier) {
-    Text(text, style = MaterialTheme.typography.bodyLarge, modifier = modifier)
+internal fun LineText(
+    text: String,
+    modifier: Modifier = Modifier,
+    spokenWordIndex: Int? = null,
+) {
+    if (spokenWordIndex == null) {
+        Text(text, style = MaterialTheme.typography.bodyLarge, modifier = modifier)
+        return
+    }
+    // Split on the same rule the timings were built with, so word N here is word N
+    // there. Whitespace is kept in the output so the line still reads normally.
+    var word = -1
+    val annotated = buildAnnotatedString {
+        for (part in Regex("""(\s+|\S+)""").findAll(text)) {
+            val chunk = part.value
+            if (chunk.isBlank()) {
+                append(chunk)
+            } else {
+                word++
+                if (word == spokenWordIndex) {
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(chunk) }
+                } else {
+                    append(chunk)
+                }
+            }
+        }
+    }
+    Text(annotated, style = MaterialTheme.typography.bodyLarge, modifier = modifier)
 }

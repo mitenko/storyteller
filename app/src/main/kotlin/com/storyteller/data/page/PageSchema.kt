@@ -126,6 +126,9 @@ fun pageInstruction(width: Int, height: Int): String = """
     - Return sound effects and lettering that is spoken aloud - PAF!, FOOMP! - as
       units with speaker "Narrator". Do not drop a line because no character speaks
       it. A line that is missing is never read to the child at all.
+    - Return each speech balloon EXACTLY ONCE. Never return the same words twice,
+      once as narration and once attributed to a character; decide who says it and
+      return one unit.
     - Reproduce the text verbatim. Do not merge units, split units, translate, or
       correct spelling.
     - Set bounds to the box enclosing that unit's speech bubble, as absolute pixel

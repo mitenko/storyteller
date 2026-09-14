@@ -1,6 +1,7 @@
 package com.storyteller.data.audio
 
 import android.content.Context
+import android.util.Base64
 import android.database.sqlite.SQLiteException
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -48,8 +49,30 @@ class AudioRepositoryImplTest {
     private lateinit var api: ElevenLabsTtsApi
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
-    private fun audioResponse(bytes: ByteArray) =
-        MockResponse.Builder().code(200).body(Buffer().write(bytes)).build()
+    /**
+     * The `/with-timestamps` shape: the clip arrives base64 INSIDE JSON, not as a
+     * byte stream. Probed against the live service on 2026-09-10.
+     *
+     * [alignment] is the per-character timing, optional because a response without
+     * it is the case the estimator exists for.
+     */
+    private fun audioResponse(bytes: ByteArray, alignment: String? = null): MockResponse {
+        val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+        val body = if (alignment == null) {
+            """{"audio_base64":"$b64"}"""
+        } else {
+            """{"audio_base64":"$b64","alignment":$alignment}"""
+        }
+        return MockResponse.Builder().code(200).body(Buffer().writeUtf8(body))
+            .setHeader("content-type", "application/json").build()
+    }
+
+    /** "Buy me", as the service really returns it: parallel arrays, seconds. */
+    private val buyMeAlignment = """
+        {"characters":["B","u","y"," ","m","e"],
+         "character_start_times_seconds":[0.0,0.081,0.139,0.174,0.232,0.267],
+         "character_end_times_seconds":[0.081,0.139,0.174,0.232,0.267,0.302]}
+    """.trimIndent()
 
     @Before fun setUp() {
         server = MockWebServer().apply { start() }
@@ -84,6 +107,61 @@ class AudioRepositoryImplTest {
         val file = repo().audioFor("Get away!", "v-antoni").getOrThrow()
 
         assertTrue(file.exists())
+        assertArrayEquals(mp3, file.readBytes())
+    }
+
+    // --- M4A: word timings ---
+
+    @Test fun `alignment is stored beside the clip and reads back as words`() = runTest {
+        server.enqueue(audioResponse(byteArrayOf(1, 2, 3), buyMeAlignment))
+        val r = repo()
+        r.audioFor("Buy me", "v-a").getOrThrow()
+
+        val timings = r.timingsFor("Buy me", "v-a")
+
+        assertEquals(2, timings?.size)
+        assertEquals(0, timings!![0].startMs)
+        assertEquals(174, timings[0].endMs)
+        assertEquals(232, timings[1].startMs)
+    }
+
+    /**
+     * The ordinary case, not an error: every clip cached before timings existed
+     * answers null, and the caller estimates instead of re-buying the audio.
+     */
+    @Test fun `a clip synthesised without alignment has no timings`() = runTest {
+        server.enqueue(audioResponse(byteArrayOf(1, 2, 3)))
+        val r = repo()
+        r.audioFor("Buy me", "v-a").getOrThrow()
+
+        assertNull(r.timingsFor("Buy me", "v-a"))
+    }
+
+    @Test fun `timings for a line that was never synthesised are absent`() = runTest {
+        assertNull(repo().timingsFor("never spoken", "v-a"))
+    }
+
+    /**
+     * A timing file that cannot be read must not fail a page that plays perfectly
+     * well. Highlighting approximately beats refusing to read.
+     */
+    @Test fun `a corrupt sidecar reads as no timings rather than throwing`() = runTest {
+        server.enqueue(audioResponse(byteArrayOf(1, 2, 3), buyMeAlignment))
+        val dir = tmp.newFolder("audio-corrupt")
+        val r = AudioRepositoryImpl(api, db.cachedAudioDao(), dir)
+        r.audioFor("Buy me", "v-a").getOrThrow()
+        dir.listFiles()!!.first { it.name.endsWith(".json") }.writeText("{not json at all")
+
+        assertNull(r.timingsFor("Buy me", "v-a"))
+    }
+
+    /** The clip still has to be the clip: base64 in, exact bytes out. */
+    @Test fun `the decoded clip is byte-identical to what the service sent`() = runTest {
+        val mp3 = byteArrayOf(0x49, 0x44, 0x33, 9, -1, 0, 7)
+        server.enqueue(audioResponse(mp3, buyMeAlignment))
+
+        val file = repo().audioFor("Buy me", "v-a").getOrThrow()
+
         assertArrayEquals(mp3, file.readBytes())
     }
 
