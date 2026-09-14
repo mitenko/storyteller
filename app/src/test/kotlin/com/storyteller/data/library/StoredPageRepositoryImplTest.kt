@@ -45,8 +45,8 @@ class StoredPageRepositoryImplTest {
 
     @After fun tearDown() = db.close()
 
-    private fun repo(maxPages: Int = 50) =
-        StoredPageRepositoryImpl(db.storedPageDao(), pages, audio, maxPages)
+    private fun repo(maxPages: Int = 50, maxBytes: Long = Long.MAX_VALUE) =
+        StoredPageRepositoryImpl(db.storedPageDao(), pages, audio, maxPages, maxBytes)
 
     private fun clip(name: String): File =
         File(audio, name).apply { writeBytes(byteArrayOf(1, 2, 3)) }
@@ -63,6 +63,30 @@ class StoredPageRepositoryImplTest {
         displayBytes = byteArrayOf(1, 2, 3, 4),
         width = 800,
         height = 1200,
+    )
+
+    /**
+     * A photograph of a stated size. Measured on 2026-09-14 across 20 device
+     * captures, a real display JPEG is 1.21-2.05 MB - see
+     * docs/issues/2026-09-14-page-storage-measured.md. The spread is the whole
+     * reason eviction counts bytes instead of pages, so these tests use pages of
+     * DIFFERENT sizes rather than one nominal one.
+     */
+    private fun imageOf(photoBytes: Int) = PageImage(
+        bytes = byteArrayOf(9),
+        mimeType = "image/jpeg",
+        displayBytes = ByteArray(photoBytes) { 7 },
+        width = 800,
+        height = 1200,
+    )
+
+    private fun clipOf(name: String, bytes: Int): File =
+        File(audio, name).apply { writeBytes(ByteArray(bytes) { 3 }) }
+
+    private fun preparedOf(index: Int, audioName: String, bytes: Int) = PreparedUnit(
+        unit = SpeechUnit(index, "Cogsley", "line $index", BoundingBox(0f, 0f, 1f, 1f)),
+        voiceId = "v",
+        audio = clipOf(audioName, bytes),
     )
 
     @Test fun `saving writes the photograph and a row`() = runTest {
@@ -158,5 +182,74 @@ class StoredPageRepositoryImplTest {
         val library = r.observeLibrary().first()
         assertEquals(1, library.size)
         assertEquals(2, library[0].units.size)
+    }
+
+    // ---- M6A: a ceiling in bytes -------------------------------------------
+
+    /**
+     * The property the byte budget exists for, and the one a page COUNT cannot
+     * promise. Three pages of 400 bytes each fit a 1000-byte budget only two at a
+     * time; a count of three would have admitted all of them.
+     */
+    @Test fun `the budget is enforced in bytes, not in pages`() = runTest {
+        val r = repo(maxBytes = 1000)
+
+        r.save("p1", imageOf(400), listOf(preparedOf(0, "a.mp3", 0)))
+        r.save("p2", imageOf(400), listOf(preparedOf(1, "b.mp3", 0)))
+        r.save("p3", imageOf(400), listOf(preparedOf(2, "c.mp3", 0)))
+
+        val ids = r.observeLibrary().first().map { it.id }
+        assertEquals("the oldest goes when the bytes do not fit", listOf("p3", "p2"), ids)
+    }
+
+    /** Audio counts too - it is a sixth of a real page, not nothing. */
+    @Test fun `a page's clips count against the budget`() = runTest {
+        val r = repo(maxBytes = 1000)
+
+        r.save("p1", imageOf(300), listOf(preparedOf(0, "a.mp3", 300)))
+        r.save("p2", imageOf(300), listOf(preparedOf(1, "b.mp3", 300)))
+
+        // 600 + 600 = 1200 > 1000, so the oldest must go.
+        assertEquals(listOf("p2"), r.observeLibrary().first().map { it.id })
+    }
+
+    /**
+     * One page larger than the whole budget must still be readable. Evicting it the
+     * instant it is saved would mean a child photographs a page, hears it read, and
+     * finds it gone - having already paid for it.
+     */
+    @Test fun `a single page bigger than the budget is kept anyway`() = runTest {
+        val r = repo(maxBytes = 100)
+
+        r.save("huge", imageOf(5000), listOf(preparedOf(0, "a.mp3", 0)))
+
+        assertEquals(listOf("huge"), r.observeLibrary().first().map { it.id })
+        assertTrue(r.open("huge")!!.photo.exists())
+    }
+
+    /** Eviction by bytes must not break the sharing rule count-eviction respected. */
+    @Test fun `evicting for space never deletes a clip another page needs`() = runTest {
+        val r = repo(maxBytes = 900)
+
+        r.save("p1", imageOf(400), listOf(preparedOf(0, "shared.mp3", 10)))
+        r.save("p2", imageOf(400), listOf(preparedOf(0, "shared.mp3", 10)))
+        r.save("p3", imageOf(400), listOf(preparedOf(0, "shared.mp3", 10)))
+
+        assertTrue(
+            "p3 still speaks that line",
+            File(audio, "shared.mp3").exists(),
+        )
+    }
+
+    /** A budget that nothing exceeds must evict nothing at all. */
+    @Test fun `nothing is evicted while the pages fit`() = runTest {
+        val r = repo(maxBytes = 10_000)
+
+        r.save("p1", imageOf(400), listOf(preparedOf(0, "a.mp3", 100)))
+        r.save("p2", imageOf(400), listOf(preparedOf(1, "b.mp3", 100)))
+        r.save("p3", imageOf(400), listOf(preparedOf(2, "c.mp3", 100)))
+
+        assertEquals(3, r.observeLibrary().first().size)
+        assertTrue(File(audio, "a.mp3").exists())
     }
 }
